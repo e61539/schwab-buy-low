@@ -1,0 +1,15 @@
+{
+  "DEFAULT": {
+    "min_usd": 100,
+    "max_slippage": 0.003
+  },
+  "SPY": {
+    "exp_cap": 0.25
+  },
+  "QQQ": {
+    "exp_cap": 0.25
+  },
+  "GLD": {
+    "exp_cap": 0.10
+  }
+}

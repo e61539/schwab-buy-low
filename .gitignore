@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local credentials and broker tokens
+.env
+config/tokens.txt
+config/tokens.json
+config/schwab_token.json
+config/acct.json
+
+# Runtime state, logs, and locks
+runtime/*
+!runtime/.gitkeep
+!runtime/logs/
+!runtime/logs/.gitkeep
+!runtime/locks/
+!runtime/locks/.gitkeep
+
+# Large/generated data
+*.log
+*.csv
+*.zip
+*.bak
+*.tmp
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vs/
+.vscode/
