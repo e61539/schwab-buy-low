@@ -1059,6 +1059,27 @@ def _run_unlocked(symbol: str,
     else:
         print(f"[CAP-DETAIL] {stock} skipped (est_price invalid) ask={ask} close={close} max_slippage={max_slippage}")
 
+    target_gap_dollar = (ask - use_tp) if (_finite(ask) and _finite(use_tp)) else float("nan")
+    target_gap_pct = ((ask / use_tp) - 1.0) * 100.0 if (_finite(ask) and _finite(use_tp) and use_tp) else float("nan")
+    cap_headroom = _allow_mv if "_allow_mv" in locals() else float("nan")
+    if not regime_up:
+        primary_block = "regime"
+    elif not meets_target:
+        primary_block = "target"
+    elif bps > allowed_bps:
+        primary_block = "spread"
+    elif _finite(cap_headroom) and cap_headroom <= 0:
+        primary_block = "cap"
+    else:
+        primary_block = "ready"
+    print(
+        f"[SUMMARY] {stock} signal={'BUY' if (regime_up and meets_target) else 'HOLD'} "
+        f"block={primary_block} dip={dip_from_base:.2f}% "
+        f"target_gap=${target_gap_dollar:.2f} ({target_gap_pct:.2f}%) "
+        f"spread_bps={bps:.1f}/{allowed_bps} cap_headroom=${cap_headroom:.2f} "
+        f"brake={brake_level}"
+    )
+
     # log signal
     log_event(side="BUY", symbol=stock, mode="buy", baseline=baseline_name,
               threshold_pct=use_thr_val, last=(last or ""), close=close,
