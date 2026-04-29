@@ -319,6 +319,47 @@ def _broker_order_accepted(resp) -> tuple[bool, int | None, str]:
     ok = bool(status_code is not None and 200 <= int(status_code) < 300 and order_id)
     return ok, status_code, order_id
 
+def _fmt_final_value(value, *, money: bool = False, digits: int = 2) -> str:
+    if value is None:
+        return "NA"
+    try:
+        f = float(value)
+        if not math.isfinite(f):
+            return "inf" if f > 0 else "NA"
+        if money:
+            return f"${f:.{digits}f}"
+        return f"{f:.{digits}f}"
+    except Exception:
+        return str(value)
+
+def _log_final(
+    *,
+    symbol: str,
+    signal: str,
+    block: str,
+    final_qty=0,
+    ask=None,
+    effective_budget=None,
+    stage_frac=None,
+    max_new_shares=None,
+    raw_stage_shares=None,
+    cap_headroom=None,
+    cash_after_reserve=None,
+    daily_remaining=None,
+) -> None:
+    print(
+        f"[FINAL] symbol={symbol} signal={signal} block={block} "
+        f"final_qty={final_qty} "
+        f"ask={_fmt_final_value(ask)} "
+        f"effective_budget={_fmt_final_value(effective_budget, money=True)} "
+        f"stage_frac={_fmt_final_value(stage_frac, digits=3)} "
+        f"max_new_shares={max_new_shares if max_new_shares is not None else 'NA'} "
+        f"raw_stage_shares={_fmt_final_value(raw_stage_shares, digits=4)} "
+        f"cap_headroom={_fmt_final_value(cap_headroom, money=True)} "
+        f"cash_after_reserve={_fmt_final_value(cash_after_reserve, money=True)} "
+        f"daily_remaining={_fmt_final_value(daily_remaining, money=True)}"
+    )
+
 def _load_sym_min_usd(symbol: str, cli_min_usd: float) -> float:
     try:
         d = _try_load(SYM_OVERRIDES_FILE)
@@ -826,6 +867,7 @@ def _run_unlocked(symbol: str,
 
     if brake_on:
         print(f"[BRAKE] {brake_level.upper()} active — new buys paused.")
+        _log_final(symbol=stock, signal="HOLD", block="brake")
         return
 
     # quote (NaN-safe)
@@ -895,6 +937,7 @@ def _run_unlocked(symbol: str,
     gross_mv = estimate_gross_long_mv(account_hash, client.access_token)
     if _finite(equity) and equity > 0 and (gross_mv / equity) >= exp_cap * 0.999:
         print(f"[CAP] Gross long {gross_mv/equity:.1%} >= cap {exp_cap:.0%}; skip.")
+        _log_final(symbol=stock, signal="HOLD", block="gross_cap", ask=ask)
         return
 
     try:
@@ -1091,10 +1134,12 @@ def _run_unlocked(symbol: str,
         if no_spread_override:
             print(f"[SPREAD-BLOCK] {stock} spread {bps:.1f} bps > allowed {allowed_bps} bps "
                   f"(code={limit_bps_code} | json={override_bps}) -> HOLD.")
+            _log_final(symbol=stock, signal="HOLD", block="spread", ask=ask, cap_headroom=cap_headroom)
             return
         else:
             if not meets_target:
                 print(f"[SKIP] {stock} spread {bps:.1f} bps > allowed {allowed_bps} bps and ask above target.")
+                _log_final(symbol=stock, signal="HOLD", block="spread", ask=ask, cap_headroom=cap_headroom)
                 return
             print(f"[WARN] {stock} spread {bps:.1f} bps > allowed {allowed_bps} bps "
                   f"(code={limit_bps_code} | json={override_bps}); override permitted; proceeding.")
@@ -1110,6 +1155,7 @@ def _run_unlocked(symbol: str,
         reason = " and ".join(reason_parts) if reason_parts else "conditions not met"
         print(f"[HOLD] {stock} strict-atr: {reason}.")
         if not regime_up:
+            _log_final(symbol=stock, signal="HOLD", block="regime", ask=ask, cap_headroom=cap_headroom)
             return
 
     # --- Direction Change Trigger ---
@@ -1128,11 +1174,13 @@ def _run_unlocked(symbol: str,
 
         if not _finite(price_cap) or float(price_cap) <= 0.0:
             print(f"[SKIP] {stock} trigger invalid price_cap={price_cap}")
+            _log_final(symbol=stock, signal="HOLD", block="invalid_price", ask=ask)
             return
 
         now_ts = datetime.now(TZ).timestamp()
         if now_ts - _last_trade_ts.get(stock, 0.0) < 1800:
             print(f"[TRIGGER-HOLD] {stock} cooldown active")
+            _log_final(symbol=stock, signal="HOLD", block="trigger_cooldown", ask=ask)
             return
 
         current_mv = (qty_owned * price_cap)
@@ -1141,6 +1189,8 @@ def _run_unlocked(symbol: str,
         headroom_combined_trigger = min(sym_headroom_mv_trigger, cash_budget_trigger)
 
         desired_shares = int(stage_usd / price_cap) if price_cap > 0 else 0
+        trigger_max_new_shares = int(headroom_combined_trigger / price_cap) if price_cap > 0 else 0
+        trigger_raw_stage_shares = float(desired_shares)
 
         buy_shares, used_budget, size_note = partial_size(
             symbol=stock,
@@ -1160,12 +1210,28 @@ def _run_unlocked(symbol: str,
 
             if min_qty and qty < int(min_qty):
                 print(f"[SKIP] {stock} trigger qty={qty} < min_qty={min_qty}")
+                _log_final(
+                    symbol=stock, signal="HOLD", block="min_qty",
+                    final_qty=qty, ask=ask, effective_budget=headroom_combined_trigger,
+                    stage_frac=trigger_frac, max_new_shares=trigger_max_new_shares,
+                    raw_stage_shares=trigger_raw_stage_shares,
+                    cap_headroom=sym_headroom_mv_trigger,
+                    cash_after_reserve=cash_budget_trigger,
+                )
                 return
 
             est_cost = qty * float(price_cap)
             min_usd_eff_trigger = _load_sym_min_usd(stock, min_usd)
             if min_usd_eff_trigger and est_cost < float(min_usd_eff_trigger):
                 print(f"[SKIP] {stock} trigger notional=${est_cost:.2f} < min_usd=${min_usd_eff_trigger:.2f}")
+                _log_final(
+                    symbol=stock, signal="HOLD", block="min_usd",
+                    final_qty=qty, ask=ask, effective_budget=headroom_combined_trigger,
+                    stage_frac=trigger_frac, max_new_shares=trigger_max_new_shares,
+                    raw_stage_shares=trigger_raw_stage_shares,
+                    cap_headroom=sym_headroom_mv_trigger,
+                    cash_after_reserve=cash_budget_trigger,
+                )
                 return
 
             order = {
@@ -1181,6 +1247,14 @@ def _run_unlocked(symbol: str,
 
             if not confirm:
                 print(f"[PREVIEW-TRIGGER] BUY {qty} {stock} (reason={trigger_reason})")
+                _log_final(
+                    symbol=stock, signal="BUY", block="ready",
+                    final_qty=qty, ask=ask, effective_budget=headroom_combined_trigger,
+                    stage_frac=trigger_frac, max_new_shares=trigger_max_new_shares,
+                    raw_stage_shares=trigger_raw_stage_shares,
+                    cap_headroom=sym_headroom_mv_trigger,
+                    cash_after_reserve=cash_budget_trigger,
+                )
             else:
                 lock_path = str(LOCKS_DIR / f"{stock}.lock")
                 with file_lock(lock_path, timeout=10):
@@ -1190,8 +1264,34 @@ def _run_unlocked(symbol: str,
                 print(f"[TRIGGER BUY] {stock} qty={qty} reason={trigger_reason} status={status_code} order_id={order_id}")
                 if not accepted:
                     print(f"[ORDER-REJECTED] {stock} trigger order not accepted; stage/budget unchanged.")
+                    _log_final(
+                        symbol=stock, signal="HOLD", block="order_rejected",
+                        final_qty=qty, ask=ask, effective_budget=headroom_combined_trigger,
+                        stage_frac=trigger_frac, max_new_shares=trigger_max_new_shares,
+                        raw_stage_shares=trigger_raw_stage_shares,
+                        cap_headroom=sym_headroom_mv_trigger,
+                        cash_after_reserve=cash_budget_trigger,
+                    )
                     return
+                _log_final(
+                    symbol=stock, signal="BUY", block="ready",
+                    final_qty=qty, ask=ask, effective_budget=headroom_combined_trigger,
+                    stage_frac=trigger_frac, max_new_shares=trigger_max_new_shares,
+                    raw_stage_shares=trigger_raw_stage_shares,
+                    cap_headroom=sym_headroom_mv_trigger,
+                    cash_after_reserve=cash_budget_trigger,
+                )
                 _last_trade_ts[stock] = now_ts
+
+        else:
+            _log_final(
+                symbol=stock, signal="HOLD", block="no_viable_size",
+                ask=ask, effective_budget=headroom_combined_trigger,
+                stage_frac=trigger_frac, max_new_shares=trigger_max_new_shares,
+                raw_stage_shares=trigger_raw_stage_shares,
+                cap_headroom=sym_headroom_mv_trigger,
+                cash_after_reserve=cash_budget_trigger,
+            )
 
         return
 
@@ -1230,6 +1330,26 @@ def _run_unlocked(symbol: str,
                 return 1.0 / N
         else:
             return 1.0 if (stages[0].get('frac') is None) else max(0.0, float(stages[0]['frac']))
+
+    if not to_fire:
+        next_stage_idx = 0
+        while (next_stage_idx < N) and ((next_stage_idx + 1) in fired):
+            next_stage_idx += 1
+        next_stage_idx = min(next_stage_idx, N - 1) if N else 0
+        hold_stage_frac = compute_stage_frac(next_stage_idx) if N else 0.0
+        hold_effective_budget = max(0.0, min(sym_headroom_mv_now, cash_after_reserve, float(eff_budget)))
+        hold_ask_for_sizing = ask if _finite(ask) and ask > 0 else _est_price
+        hold_max_new_shares = int(hold_effective_budget / hold_ask_for_sizing) if hold_ask_for_sizing > 0 else 0
+        hold_raw_stage_shares = hold_max_new_shares * hold_stage_frac
+        _log_final(
+            symbol=stock, signal="HOLD", block=primary_block,
+            final_qty=0, ask=ask, effective_budget=hold_effective_budget,
+            stage_frac=hold_stage_frac, max_new_shares=hold_max_new_shares,
+            raw_stage_shares=hold_raw_stage_shares,
+            cap_headroom=sym_headroom_mv_now,
+            cash_after_reserve=cash_after_reserve,
+            daily_remaining=daily_remaining,
+        )
 
     # --- Order builder per stage ---
     def build_order(price_cap: float) -> dict:
@@ -1270,6 +1390,13 @@ def _run_unlocked(symbol: str,
 
         if (price_cap is None) or (not _finite(price_cap)) or (float(price_cap) <= 0.0):
             print(f"[SKIP] {stock} invalid price_cap={price_cap}")
+            _log_final(
+                symbol=stock, signal="HOLD", block="invalid_price",
+                ask=ask, effective_budget=eff_budget,
+                cap_headroom=sym_headroom_mv_now,
+                cash_after_reserve=cash_after_reserve,
+                daily_remaining=daily_remaining,
+            )
             continue
 
         current_mv = (qty_owned * price_cap)
@@ -1300,17 +1427,44 @@ def _run_unlocked(symbol: str,
                 f"(effective_budget=${effective_budget:.2f}, ask={ask_for_sizing:.2f}, "
                 f"cash={cash:.2f}, sym_cap={sym_cap_eff:.0%})."
             )
+            _log_final(
+                symbol=stock, signal="HOLD", block="no_viable_size",
+                final_qty=0, ask=ask, effective_budget=effective_budget,
+                stage_frac=stage_frac, max_new_shares=max_new_shares,
+                raw_stage_shares=raw_stage_shares,
+                cap_headroom=sym_headroom_mv,
+                cash_after_reserve=cash_after_reserve,
+                daily_remaining=daily_remaining,
+            )
             continue
 
         qty = int(final_qty)
         if min_qty and qty < int(min_qty):
             print(f"[SKIP] {stock} qty={qty} < min_qty={min_qty} (probe-block).")
+            _log_final(
+                symbol=stock, signal="HOLD", block="min_qty",
+                final_qty=qty, ask=ask, effective_budget=effective_budget,
+                stage_frac=stage_frac, max_new_shares=max_new_shares,
+                raw_stage_shares=raw_stage_shares,
+                cap_headroom=sym_headroom_mv,
+                cash_after_reserve=cash_after_reserve,
+                daily_remaining=daily_remaining,
+            )
             continue
 
         est_cost = qty * float(price_cap)
 
         if min_usd_eff and est_cost < float(min_usd_eff):
             print(f"[SKIP] {stock} notional=${est_cost:.2f} < min_usd=${min_usd_eff:.2f} (tiny-order-block).")
+            _log_final(
+                symbol=stock, signal="HOLD", block="min_usd",
+                final_qty=qty, ask=ask, effective_budget=effective_budget,
+                stage_frac=stage_frac, max_new_shares=max_new_shares,
+                raw_stage_shares=raw_stage_shares,
+                cap_headroom=sym_headroom_mv,
+                cash_after_reserve=cash_after_reserve,
+                daily_remaining=daily_remaining,
+            )
             continue
 
         order = build_order(price_cap)
@@ -1319,7 +1473,16 @@ def _run_unlocked(symbol: str,
         if not confirm:
             print(f"[PREVIEW] BUY {qty} {stock} @ {order['orderType']} "
                   f"{ (price_cap if order['orderType']=='LIMIT' else '') } "
-                  f"(stage {next_idx+1}/{N}; thr={use_thr_val:.2f}% k={use_k:.2f}; ≤ ${stage_usd:.2f}; est ${est_cost:.2f})")
+                  f"(stage {next_idx+1}/{N}; thr={use_thr_val:.2f}% k={use_k:.2f}; ≤ ${effective_budget:.2f}; est ${est_cost:.2f})")
+            _log_final(
+                symbol=stock, signal="BUY", block="ready",
+                final_qty=qty, ask=ask, effective_budget=effective_budget,
+                stage_frac=stage_frac, max_new_shares=max_new_shares,
+                raw_stage_shares=raw_stage_shares,
+                cap_headroom=sym_headroom_mv,
+                cash_after_reserve=cash_after_reserve,
+                daily_remaining=daily_remaining,
+            )
             cash -= est_cost
             qty_owned += qty
             fired.add(next_idx+1)
@@ -1338,7 +1501,26 @@ def _run_unlocked(symbol: str,
         print(f"Order submitted. Status={status_code}  OrderID={order_id}")
         if not accepted:
             print(f"[ORDER-REJECTED] {stock} order not accepted; stage/budget unchanged.")
+            _log_final(
+                symbol=stock, signal="HOLD", block="order_rejected",
+                final_qty=qty, ask=ask, effective_budget=effective_budget,
+                stage_frac=stage_frac, max_new_shares=max_new_shares,
+                raw_stage_shares=raw_stage_shares,
+                cap_headroom=sym_headroom_mv,
+                cash_after_reserve=cash_after_reserve,
+                daily_remaining=daily_remaining,
+            )
             continue
+
+        _log_final(
+            symbol=stock, signal="BUY", block="ready",
+            final_qty=qty, ask=ask, effective_budget=effective_budget,
+            stage_frac=stage_frac, max_new_shares=max_new_shares,
+            raw_stage_shares=raw_stage_shares,
+            cap_headroom=sym_headroom_mv,
+            cash_after_reserve=cash_after_reserve,
+            daily_remaining=daily_remaining,
+        )
 
         fired.add(next_idx+1)
         st_state['fired'] = sorted(fired)
