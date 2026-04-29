@@ -11,6 +11,7 @@ REM   - config\sym_caps.dic (per-symbol exposure caps)
 REM   - config\sym_overrides.json (per-symbol max_slippage/min_usd for partial sizing)
 
 set "ROOT=%~dp0"
+set "BUYLOW_TOKENS_FILE=C:\temp\tokens.txt"
 
 REM ---------- Python ----------
 set "PY=C:\python313\python.exe"
@@ -49,7 +50,7 @@ set "USD_QQQ=10000"
 set "USD_GLD=1000"
 
 REM ---------- Logs ----------
-set "LOG_IRA1=%ROOT%runtime\logs"
+set "LOG_IRA1=C:\temp\logs_ira1"
 if not exist "%LOG_IRA1%" mkdir "%LOG_IRA1%"
 
 REM ---------- PowerShell host ----------

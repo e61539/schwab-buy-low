@@ -58,7 +58,8 @@ By default, all config and runtime files resolve relative to this repo folder:
 - `config\sym_caps.dic`
 - `config\sym_overrides.json`
 - `config\atrk.json`
-- `runtime\logs`
+- `config\tokens.txt` unless `BUYLOW_TOKENS_FILE` is set
+- `runtime\logs` unless the launcher sets a shared log directory
 - `runtime\locks`
 - `runtime\equity_brake.json`
 - `runtime\daily_alloc.json`
@@ -68,6 +69,8 @@ You can override the root with:
 ```powershell
 $env:BUYLOW_HOME = "D:\path\to\schwab-buy-low"
 ```
+
+The included `buysqg.cmd` points `BUYLOW_TOKENS_FILE` at `C:\temp\tokens.txt` and writes logs to `C:\temp\logs_ira1` so it can share token and log files with older launchers.
 
 ## Before Publishing
 

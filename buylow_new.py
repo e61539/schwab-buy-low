@@ -116,7 +116,7 @@ CONFIG_DIR = APP_ROOT / "config"
 RUNTIME_DIR = APP_ROOT / "runtime"
 LOCKS_DIR = RUNTIME_DIR / "locks"
 
-TOKENS_FILE  = str(CONFIG_DIR / "tokens.txt")
+TOKENS_FILE  = os.getenv("BUYLOW_TOKENS_FILE", str(CONFIG_DIR / "tokens.txt"))
 CALLBACK_URL = "https://127.0.0.1"
 BUY_DIC_PATH = str(CONFIG_DIR / "buy.dic")
 SYM_CAPS_DIC = str(CONFIG_DIR / "sym_caps.dic")
@@ -1220,11 +1220,6 @@ def _run_unlocked(symbol: str,
         brake_on=brake_on
     )
 
-    if eff_budget < float(min_usd_eff or 0.0):
-        print(f"[HOLD] budget=${eff_budget:.2f} < min_usd=${min_usd_eff:.2f} (tight caps/headroom; overrides active)")
-        print(f"[SKIP] {stock} no viable size (stage_usd={(usd or 0):.2f}, cash={cash:.2f}, sym_cap={sym_cap_eff:.0%}).")
-        return
-
     # --- Stage sizing helper ---
     def compute_stage_frac(idx: int) -> float:
         if N > 1:
@@ -1277,38 +1272,37 @@ def _run_unlocked(symbol: str,
             print(f"[SKIP] {stock} invalid price_cap={price_cap}")
             continue
 
-        stage_frac = compute_stage_frac(next_idx)
-        stage_usd_nominal = max(0.0, float(usd or 0.0)) * stage_frac
-        stage_usd = min(stage_usd_nominal, float(eff_budget))
-        if stage_usd <= 0.0:
-            print(f"[SKIP] {stock} stage budget is zero (usd={usd}, frac={stage_frac:.3f}).")
-            continue
-
         current_mv = (qty_owned * price_cap)
         sym_headroom_mv = max(0.0, sym_mv_cap - current_mv) if math.isfinite(sym_mv_cap) else float('inf')
         cash_budget     = max(0.0, (cash - CASH_BUFFER))
-        headroom_combined = min(sym_headroom_mv, cash_budget, eff_budget)
+        effective_budget = max(0.0, min(sym_headroom_mv, cash_budget, float(eff_budget)))
 
-        desired_shares = int(stage_usd / price_cap) if price_cap > 0 else 0
+        ask_for_sizing = ask if _finite(ask) and ask > 0 else price_cap
+        max_new_shares = int(effective_budget / ask_for_sizing) if ask_for_sizing > 0 else 0
 
-        buy_shares, used_budget, size_note = partial_size(
-            symbol=stock,
-            price=price_cap,
-            desired_shares=desired_shares,
-            total_equity_usd=equity,
-            current_mv_usd=current_mv,
-            headroom_usd=headroom_combined,
-            usd_per_symbol_cap=None,
-            exp_cap_default=sym_cap_eff,
-            log=print
+        stage_frac = compute_stage_frac(next_idx)
+        raw_stage_shares = max_new_shares * stage_frac
+        stage_sized_shares = int(raw_stage_shares)
+        final_qty = stage_sized_shares
+
+        if final_qty <= 0 and max_new_shares >= 1:
+            final_qty = 1
+
+        print(
+            f"[SIZE] {stock} effective_budget=${effective_budget:.2f} "
+            f"stage_frac={stage_frac:.3f} raw_stage_shares={raw_stage_shares:.4f} "
+            f"max_new_shares={max_new_shares} final_qty={final_qty}"
         )
-        print(size_note)
 
-        if buy_shares <= 0:
-            print(f"[SKIP] {stock} no viable size (stage_usd={stage_usd:.2f}, cash={cash:.2f}, sym_cap={sym_cap_eff:.0%}).")
+        if max_new_shares < 1:
+            print(
+                f"[SKIP] {stock} no viable size "
+                f"(effective_budget=${effective_budget:.2f}, ask={ask_for_sizing:.2f}, "
+                f"cash={cash:.2f}, sym_cap={sym_cap_eff:.0%})."
+            )
             continue
 
-        qty = int(buy_shares)
+        qty = int(final_qty)
         if min_qty and qty < int(min_qty):
             print(f"[SKIP] {stock} qty={qty} < min_qty={min_qty} (probe-block).")
             continue
