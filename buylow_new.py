@@ -25,7 +25,7 @@ Files (defaults):
 Depends on: buy_relax_kit.py, trade_logger.py, schwabdev (env app_key/app_secret + tokens.txt)
 """
 
-import os, sys, json, time as _time, argparse, math
+import os, sys, json, time as _time, argparse, math, threading, queue
 from contextlib import contextmanager
 from datetime import datetime, date, time as ttime, timezone, timedelta
 from pathlib import Path
@@ -116,7 +116,19 @@ CONFIG_DIR = APP_ROOT / "config"
 RUNTIME_DIR = APP_ROOT / "runtime"
 LOCKS_DIR = RUNTIME_DIR / "locks"
 
-TOKENS_FILE  = os.getenv("BUYLOW_TOKENS_FILE", str(CONFIG_DIR / "tokens.txt"))
+def _tokens_file_from_schwab_config() -> str | None:
+    cfg_path = os.getenv("SCHWAB_CONFIG_FILE", r"C:\temp\schwab_config.json")
+    try:
+        with open(cfg_path, "r", encoding="utf-8-sig") as f:
+            cfg = json.load(f)
+        tokens_file = cfg.get("tokens_file") if isinstance(cfg, dict) else None
+        if tokens_file:
+            return str(tokens_file)
+    except Exception:
+        pass
+    return None
+
+TOKENS_FILE  = os.getenv("BUYLOW_TOKENS_FILE") or _tokens_file_from_schwab_config() or str(CONFIG_DIR / "tokens.txt")
 CALLBACK_URL = "https://127.0.0.1"
 BUY_DIC_PATH = str(CONFIG_DIR / "buy.dic")
 SYM_CAPS_DIC = str(CONFIG_DIR / "sym_caps.dic")
@@ -141,6 +153,11 @@ END_EXT    = ttime(20, 0)
 CONNECT_TIMEOUT = 10
 READ_TIMEOUT    = 30
 CASH_BUFFER     = 25.00
+AUTH_STATUS_FILE = os.getenv("BUYLOW_AUTH_STATUS_FILE", r"C:\temp\schwab_auth_status.json")
+SCHWAB_REFRESH_MAX_AGE = timedelta(days=7)
+SCHWAB_REFRESH_REAUTH_MARGIN = timedelta(minutes=5)
+TOKEN_REAUTH_POLL_SEC = max(1, int(os.getenv("BUYLOW_REAUTH_POLL_SEC", "10")))
+SCHWAB_SDK_TIMEOUT_SEC = max(1, int(os.getenv("BUYLOW_SCHWAB_SDK_TIMEOUT_SEC", "15")))
 
 # Basis-point ceilings (code defaults). JSON eff_max_slippage() can raise via FRACTION.
 SPREAD_LIMIT_BPS = {
@@ -153,6 +170,10 @@ DEFAULT_REGIME_SYMBOL = "SPY"
 ATR_LEN   = 14
 
 _last_trade_ts: Dict[str, float] = {}
+
+class SchwabAuthRequired(RuntimeError):
+    """Raised when Schwab needs a manual OAuth re-auth and a new token file."""
+    pass
 
 # ---------- ATR-K overrides (hot reload each pass) ----------
 def load_atrk_overrides(path: str) -> Dict[str, float]:
@@ -185,10 +206,181 @@ def session_with_retries() -> requests.Session:
     return s
 
 def parse_json(resp_or_text):
+    _raise_if_auth_response(resp_or_text)
     if hasattr(resp_or_text, "json"):
         try: return resp_or_text.json()
         except Exception: pass
     return json.loads(getattr(resp_or_text, "text", resp_or_text))
+
+def _token_file_signature(tokens_path: str = TOKENS_FILE):
+    try:
+        st = os.stat(tokens_path)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+def _load_tokens(tokens_path: str = TOKENS_FILE) -> dict:
+    try:
+        with open(tokens_path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def _token_dict(tokens: dict) -> dict:
+    td = tokens.get("token_dictionary") if isinstance(tokens, dict) else None
+    return td if isinstance(td, dict) else (tokens if isinstance(tokens, dict) else {})
+
+def _write_auth_status(ok: bool, auth_required: bool, message: str, source: str) -> None:
+    payload = {
+        "ok": bool(ok),
+        "auth_required": bool(auth_required),
+        "message": str(message or ""),
+        "last_checked": datetime.now(timezone.utc).isoformat(),
+        "source": str(source or ""),
+    }
+    try:
+        os.makedirs(os.path.dirname(AUTH_STATUS_FILE), exist_ok=True)
+        tmp = AUTH_STATUS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(tmp, AUTH_STATUS_FILE)
+    except Exception:
+        pass
+
+def _call_with_timeout(fn, timeout_sec: int, timeout_message: str):
+    q: queue.Queue = queue.Queue(maxsize=1)
+
+    def worker():
+        try:
+            q.put((True, fn()))
+        except Exception as e:
+            q.put((False, e))
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    try:
+        ok, value = q.get(timeout=timeout_sec)
+    except queue.Empty:
+        raise SchwabAuthRequired(timeout_message)
+    if ok:
+        return value
+    raise value
+
+def _parse_token_time(value):
+    if not value:
+        return None
+    try:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+def _refresh_token_age(tokens_path: str = TOKENS_FILE):
+    issued = _parse_token_time(_load_tokens(tokens_path).get("refresh_token_issued"))
+    if not issued:
+        return None
+    return datetime.now(timezone.utc) - issued.astimezone(timezone.utc)
+
+def _refresh_token_needs_reauth(tokens_path: str = TOKENS_FILE) -> bool:
+    age = _refresh_token_age(tokens_path)
+    if age is None:
+        return True
+    return age >= (SCHWAB_REFRESH_MAX_AGE - SCHWAB_REFRESH_REAUTH_MARGIN)
+
+def _verify_schwab_auth_from_tokens(tokens_path: str = TOKENS_FILE) -> tuple[bool, str]:
+    tokens = _load_tokens(tokens_path)
+    access_token = _token_dict(tokens).get("access_token")
+    if not access_token:
+        return False, "access token missing"
+    url = "https://api.schwabapi.com/marketdata/v1/quotes"
+    try:
+        r = requests.get(
+            url,
+            params={"symbols": DEFAULT_REGIME_SYMBOL},
+            headers={"Accept": "application/json", "Authorization": f"Bearer {access_token}"},
+            timeout=(CONNECT_TIMEOUT, min(READ_TIMEOUT, 10)),
+        )
+    except Exception as e:
+        return False, f"auth check failed: {e}"
+    if r.status_code == 200:
+        return True, "Schwab quote auth check succeeded"
+    if r.status_code in (401, 403):
+        return False, f"Schwab quote auth check returned HTTP {r.status_code}"
+    return False, f"Schwab quote auth check returned HTTP {r.status_code}"
+
+def _raise_if_auth_response(resp) -> None:
+    status_code = getattr(resp, "status_code", None)
+    try:
+        status_code = int(status_code) if status_code is not None else None
+    except Exception:
+        status_code = None
+    if status_code in (401, 403):
+        raise SchwabAuthRequired(f"Schwab API returned HTTP {status_code}")
+
+def _is_auth_exception(exc: Exception) -> bool:
+    if isinstance(exc, SchwabAuthRequired):
+        return True
+    resp = getattr(exc, "response", None)
+    status_code = getattr(resp, "status_code", None)
+    try:
+        if int(status_code) in (401, 403):
+            return True
+    except Exception:
+        pass
+    text = str(exc).lower()
+    auth_markers = ("401", "403", "unauthorized", "forbidden", "invalid_token", "refresh token")
+    return any(marker in text for marker in auth_markers)
+
+def _new_schwab_client_or_raise(app_key: str, app_secret: str, label: str = "client"):
+    if not _load_tokens(TOKENS_FILE) or _refresh_token_needs_reauth(TOKENS_FILE):
+        age = _refresh_token_age(TOKENS_FILE)
+        age_msg = "missing" if age is None else f"{age.total_seconds() / 86400:.2f} days old"
+        raise SchwabAuthRequired(
+            f"Schwab refresh token is {age_msg}; manual re-auth is required."
+        )
+    client = _call_with_timeout(
+        lambda: schwabdev.Client(app_key, app_secret, CALLBACK_URL, TOKENS_FILE),
+        SCHWAB_SDK_TIMEOUT_SEC,
+        f"Schwab client init timed out for {label}; manual re-auth may be required.",
+    )
+    try:
+        with file_lock(TOKENS_FILE + ".lock"):
+            _call_with_timeout(
+                client.update_tokens,
+                SCHWAB_SDK_TIMEOUT_SEC,
+                f"Schwab token refresh timed out for {label}; manual re-auth may be required.",
+            )
+    except Exception as e:
+        if isinstance(e, SchwabAuthRequired):
+            raise
+        raise SchwabAuthRequired(f"Schwab token refresh failed for {label}: {e}") from e
+    _write_auth_status(True, False, "AUTH_RESTORED: resuming BuyLow", label)
+    return client
+
+def _wait_for_manual_reauth(reason: str, previous_signature=None) -> None:
+    print(f"[AUTH] {reason}")
+    print("AUTH_REQUIRED: waiting for Schwab re-auth")
+    _write_auth_status(False, True, "AUTH_REQUIRED: waiting for Schwab re-auth", TOKENS_FILE)
+    while True:
+        ok, msg = _verify_schwab_auth_from_tokens(TOKENS_FILE)
+        _write_auth_status(ok, not ok, msg, TOKENS_FILE)
+        if ok:
+            print("AUTH_RESTORED: resuming BuyLow")
+            _write_auth_status(True, False, "AUTH_RESTORED: resuming BuyLow", TOKENS_FILE)
+            return
+        _time.sleep(TOKEN_REAUTH_POLL_SEC)
+
+def wait_for_schwab_client(app_key: str, app_secret: str, label: str = "client"):
+    while True:
+        sig = _token_file_signature(TOKENS_FILE)
+        try:
+            return _new_schwab_client_or_raise(app_key, app_secret, label=label)
+        except SchwabAuthRequired as e:
+            _wait_for_manual_reauth(str(e), previous_signature=sig)
 
 @contextmanager
 def file_lock(path, timeout=10):
@@ -314,6 +506,7 @@ def _consume_daily(amount_usd: float) -> None:
         pass
 
 def _broker_order_accepted(resp) -> tuple[bool, int | None, str]:
+    _raise_if_auth_response(resp)
     status_code = getattr(resp, "status_code", None)
     order_id = parse_order_id(resp)
     ok = bool(status_code is not None and 200 <= int(status_code) < 300 and order_id)
@@ -539,6 +732,7 @@ def positions_payload(account_hash: str, access_token: str) -> dict:
         headers={"Accept":"application/json","Authorization":f"Bearer {access_token}"},
         timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
+    _raise_if_auth_response(r)
     r.raise_for_status()
     return parse_json(r)
 
@@ -575,6 +769,7 @@ def get_account_cash_and_equity(account_hash: str, access_token: str) -> tuple[f
         headers={"Accept":"application/json","Authorization":f"Bearer {access_token}"},
         timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
+    _raise_if_auth_response(r)
     r.raise_for_status()
     data = parse_json(r)
     acct = data.get("securitiesAccount", data) if isinstance(data, dict) else (
@@ -595,7 +790,9 @@ def get_account_cash_and_equity(account_hash: str, access_token: str) -> tuple[f
 def _history_via_client(client, symbol):
     try:
         return parse_json(client.price_history(symbol, period_type="year", period=2, frequency_type="daily", frequency=1))
-    except Exception:
+    except Exception as e:
+        if _is_auth_exception(e):
+            raise SchwabAuthRequired(str(e)) from e
         return None
 
 def _history_via_http(client, symbol):
@@ -603,6 +800,7 @@ def _history_via_http(client, symbol):
     params = {"symbol":symbol,"periodType":"year","period":"2","frequencyType":"daily","frequency":"1","needExtendedHoursData":"false"}
     headers = {"Authorization":f"Bearer {client.access_token}","Accept":"application/json"}
     r = session_with_retries().get(url, params=params, headers=headers, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+    _raise_if_auth_response(r)
     if r.status_code == 200:
         return parse_json(r)
     return None
@@ -834,12 +1032,7 @@ def _run_unlocked(symbol: str,
         print("[ERR] Set env vars app_key/app_secret before running.")
         return
 
-    client = schwabdev.Client(app_key, app_secret, CALLBACK_URL, TOKENS_FILE)
-    try:
-        with file_lock(TOKENS_FILE + ".lock"):
-            client.update_tokens()
-    except Exception:
-        print("[ERROR] token refresh failed — reauth likely required.")
+    client = _new_schwab_client_or_raise(app_key, app_secret, label=f"trade client {stock}")
 
     warn_if_refresh_stale(TOKENS_FILE, days=6)
 
@@ -847,6 +1040,8 @@ def _run_unlocked(symbol: str,
         account_hash, acct_label = select_account_hash(client, args_acct, args_acct_file)
         print(f"[ACCT] Using account: {acct_label} (hash={account_hash})")
     except Exception as e:
+        if _is_auth_exception(e):
+            raise SchwabAuthRequired(str(e)) from e
         print("[ERROR] Could not select account:", e)
         return
 
@@ -885,6 +1080,8 @@ def _run_unlocked(symbol: str,
         close = _f(close, last)
         ask = _f(ask, last)
     except Exception as e:
+        if _is_auth_exception(e):
+            raise SchwabAuthRequired(str(e)) from e
         print(f"[WARN] Could not get quote for {stock}:", e)
         return
 
@@ -943,6 +1140,8 @@ def _run_unlocked(symbol: str,
     try:
         qty_owned = get_long_qty(account_hash, client.access_token, stock)
     except Exception as e:
+        if _is_auth_exception(e):
+            raise SchwabAuthRequired(str(e)) from e
         print(f"[WARN] Could not fetch positions for {stock}:", e)
         qty_owned = 0.0
     qty_owned = _f(qty_owned, 0.0)
@@ -1162,6 +1361,8 @@ def _run_unlocked(symbol: str,
     try:
         trigger_hit, trigger_reason = detect_direction_change(client, stock)
     except Exception as e:
+        if _is_auth_exception(e):
+            raise SchwabAuthRequired(str(e)) from e
         print(f"[WARN] {stock} trigger detection failed: {e}")
         trigger_hit, trigger_reason = False, ""
 
@@ -1550,23 +1751,33 @@ def run(*args, **kwargs):
     elif "symbol" in kwargs:
         symbol = str(kwargs["symbol"]).upper()
     lock_path = str(LOCKS_DIR / "BUYLOW_PORTFOLIO.lock")
-    print(f"[LOCK] Waiting for portfolio buy lock ({symbol or 'UNKNOWN'})")
-    with file_lock(lock_path, timeout=60):
-        print(f"[LOCK] Acquired portfolio buy lock ({symbol or 'UNKNOWN'})")
-        return _run_unlocked(*args, **kwargs)
+    while True:
+        try:
+            print(f"[LOCK] Waiting for portfolio buy lock ({symbol or 'UNKNOWN'})")
+            with file_lock(lock_path, timeout=60):
+                print(f"[LOCK] Acquired portfolio buy lock ({symbol or 'UNKNOWN'})")
+                return _run_unlocked(*args, **kwargs)
+        except SchwabAuthRequired as e:
+            print(f"[AUTH] Schwab auth interrupted {symbol or 'UNKNOWN'} pass; releasing lock.")
+            sig = _token_file_signature(TOKENS_FILE)
+            _wait_for_manual_reauth(str(e), previous_signature=sig)
 
 def wait_for_fill(client, account_hash, order_id, timeout_sec=45, interval_sec=3):
     deadline = _time.time() + timeout_sec
     while _time.time() < deadline:
         try:
-            det = client.order_details(account_hash, order_id).json()
+            resp = client.order_details(account_hash, order_id)
+            _raise_if_auth_response(resp)
+            det = resp.json()
             status, fill_px, fill_qty = extract_fill(det)
             status = (status or "").upper()
             if status in ("FILLED","REJECTED","CANCELED","EXPIRED"):
                 return status, fill_px, fill_qty
             if fill_px and fill_qty:
                 return "FILLED", fill_px, fill_qty
-        except Exception:
+        except Exception as e:
+            if _is_auth_exception(e):
+                raise SchwabAuthRequired(str(e)) from e
             pass
         _time.sleep(interval_sec)
     return "", None, 0.0
@@ -1682,13 +1893,7 @@ def main():
         if not app_key or not app_secret:
             print("[ERR] Set env vars app_key/app_secret before running.")
             return
-        try:
-            client_hist = schwabdev.Client(app_key, app_secret, CALLBACK_URL, TOKENS_FILE)
-            with file_lock(TOKENS_FILE + ".lock"):
-                client_hist.update_tokens()
-        except Exception as e:
-            print(f"[ERROR] token refresh (history client) failed: {e}")
-            return
+        client_hist = wait_for_schwab_client(app_key, app_secret, label="history client")
 
         atrk_file_map = load_atrk_overrides(getattr(a, "atrk_file", ATRK_OVERRIDES_FILE))
 
@@ -1727,9 +1932,10 @@ def main():
 
                 intraday_atr_val = None
                 try:
-                    data_intra = client_hist.price_history(
+                    resp_intra = client_hist.price_history(
                         sym, period_type="day", period=1, frequency_type="minute", frequency=5
-                    ).json()
+                    )
+                    data_intra = parse_json(resp_intra)
                     bars = (data_intra or {}).get("candles") or []
                     if bars and len(bars) > 50:
                         trs = []
@@ -1742,6 +1948,8 @@ def main():
                             prev_close = c["close"]
                         intraday_atr_val = sum(trs[-50:]) / 50.0
                 except Exception as e:
+                    if _is_auth_exception(e):
+                        raise SchwabAuthRequired(str(e)) from e
                     if a.verbose:
                         print(f"[AUTO-GATE] {sym}: intraday ATR unavailable ({e})")
 
@@ -1792,6 +2000,11 @@ def main():
                     atrk_uniform_cli=a.atr_k
                 )
 
+            except SchwabAuthRequired as e:
+                print(f"[AUTH] {sym}: Schwab auth required during pass.")
+                sig = _token_file_signature(TOKENS_FILE)
+                _wait_for_manual_reauth(str(e), previous_signature=sig)
+                client_hist = wait_for_schwab_client(app_key, app_secret, label="history client")
             except Exception as e:
                 print(f"[WARN] {sym}: pass failed: {e}")
             _time.sleep(0.5)
