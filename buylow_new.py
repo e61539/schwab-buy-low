@@ -175,6 +175,10 @@ class SchwabAuthRequired(RuntimeError):
     """Raised when Schwab needs a manual OAuth re-auth and a new token file."""
     pass
 
+class SchwabUnavailable(RuntimeError):
+    """Raised when Schwab network/API is transiently unavailable."""
+    pass
+
 # ---------- ATR-K overrides (hot reload each pass) ----------
 def load_atrk_overrides(path: str) -> Dict[str, float]:
     """Return {SYMBOL: k, 'DEFAULT': k} from JSON; empty dict if missing/invalid."""
@@ -248,7 +252,7 @@ def _write_auth_status(ok: bool, auth_required: bool, message: str, source: str)
     except Exception:
         pass
 
-def _call_with_timeout(fn, timeout_sec: int, timeout_message: str):
+def _call_with_timeout(fn, timeout_sec: int, timeout_message: str, timeout_exc=SchwabUnavailable):
     q: queue.Queue = queue.Queue(maxsize=1)
 
     def worker():
@@ -262,7 +266,7 @@ def _call_with_timeout(fn, timeout_sec: int, timeout_message: str):
     try:
         ok, value = q.get(timeout=timeout_sec)
     except queue.Empty:
-        raise SchwabAuthRequired(timeout_message)
+        raise timeout_exc(timeout_message)
     if ok:
         return value
     raise value
@@ -324,6 +328,8 @@ def _raise_if_auth_response(resp) -> None:
 def _is_auth_exception(exc: Exception) -> bool:
     if isinstance(exc, SchwabAuthRequired):
         return True
+    if _is_schwab_network_exception(exc):
+        return False
     resp = getattr(exc, "response", None)
     status_code = getattr(resp, "status_code", None)
     try:
@@ -335,6 +341,45 @@ def _is_auth_exception(exc: Exception) -> bool:
     auth_markers = ("401", "403", "unauthorized", "forbidden", "invalid_token", "refresh token")
     return any(marker in text for marker in auth_markers)
 
+def _is_schwab_network_exception(exc: Exception) -> bool:
+    network_types = (
+        requests.exceptions.ReadTimeout,
+        requests.exceptions.ConnectTimeout,
+        requests.exceptions.Timeout,
+        requests.exceptions.ConnectionError,
+    )
+    if isinstance(exc, (SchwabUnavailable,) + network_types):
+        return True
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None and isinstance(cause, network_types):
+        return True
+    context = getattr(exc, "__context__", None)
+    if context is not None and isinstance(context, network_types):
+        return True
+    return False
+
+def _retry_schwab_startup(fn, label: str):
+    backoffs = (3, 6, 10)
+    for retry_idx, delay in enumerate(backoffs, start=1):
+        try:
+            return fn()
+        except Exception as e:
+            if _is_auth_exception(e):
+                raise
+            if not _is_schwab_network_exception(e):
+                raise
+            print(f"[SCHWAB_TIMEOUT] client startup timeout retry {retry_idx}/3")
+            _time.sleep(delay)
+    try:
+        return fn()
+    except Exception as e:
+        if _is_auth_exception(e):
+            raise
+        if _is_schwab_network_exception(e):
+            print("[SCHWAB_UNAVAILABLE] skipping this BuyLow cycle")
+            raise SchwabUnavailable(f"Schwab unavailable during {label}: {e}") from e
+        raise
+
 def _new_schwab_client_or_raise(app_key: str, app_secret: str, label: str = "client"):
     if not _load_tokens(TOKENS_FILE) or _refresh_token_needs_reauth(TOKENS_FILE):
         age = _refresh_token_age(TOKENS_FILE)
@@ -342,21 +387,31 @@ def _new_schwab_client_or_raise(app_key: str, app_secret: str, label: str = "cli
         raise SchwabAuthRequired(
             f"Schwab refresh token is {age_msg}; manual re-auth is required."
         )
-    client = _call_with_timeout(
-        lambda: schwabdev.Client(app_key, app_secret, CALLBACK_URL, TOKENS_FILE),
-        SCHWAB_SDK_TIMEOUT_SEC,
-        f"Schwab client init timed out for {label}; manual re-auth may be required.",
+    client = _retry_schwab_startup(
+        lambda: _call_with_timeout(
+            lambda: schwabdev.Client(app_key, app_secret, CALLBACK_URL, TOKENS_FILE),
+            SCHWAB_SDK_TIMEOUT_SEC,
+            f"Schwab client init timed out for {label}.",
+            timeout_exc=SchwabUnavailable,
+        ),
+        label,
     )
     try:
         with file_lock(TOKENS_FILE + ".lock"):
-            _call_with_timeout(
-                client.update_tokens,
-                SCHWAB_SDK_TIMEOUT_SEC,
-                f"Schwab token refresh timed out for {label}; manual re-auth may be required.",
+            _retry_schwab_startup(
+                lambda: _call_with_timeout(
+                    client.update_tokens,
+                    SCHWAB_SDK_TIMEOUT_SEC,
+                    f"Schwab token refresh timed out for {label}.",
+                    timeout_exc=SchwabUnavailable,
+                ),
+                label,
             )
     except Exception as e:
         if isinstance(e, SchwabAuthRequired):
             raise
+        if _is_schwab_network_exception(e):
+            raise SchwabUnavailable(f"Schwab unavailable during token refresh for {label}: {e}") from e
         raise SchwabAuthRequired(f"Schwab token refresh failed for {label}: {e}") from e
     _write_auth_status(True, False, "AUTH_RESTORED: resuming BuyLow", label)
     return client
@@ -597,6 +652,107 @@ def _log_budget_why(logger_print,
         eff = min(eff, float(ov))
     logger_print(f"[WHY] budget_parts={parts} -> effective_budget={eff:.2f}")
     return eff
+
+def _budget_zero_reason(
+    *,
+    cash_after_reserve: float,
+    non_symbol_budget: float,
+    global_cap_remaining: float,
+    symbol_cap_headroom: float,
+    daily_remaining: float,
+    effective_budget: float,
+    ask_for_sizing: float,
+    max_budget_shares: int,
+    max_symbol_cap_shares: int,
+    final_qty: int,
+) -> str:
+    reasons = []
+    if cash_after_reserve <= 0:
+        reasons.append("cash_after_reserve<=0")
+    if math.isfinite(global_cap_remaining) and global_cap_remaining <= 0:
+        reasons.append("global_cap_remaining<=0")
+    if math.isfinite(symbol_cap_headroom) and symbol_cap_headroom <= 0:
+        reasons.append("symbol_cap_headroom<=0")
+    if math.isfinite(daily_remaining) and daily_remaining <= 0:
+        reasons.append("daily_allocation_remaining<=0")
+    if non_symbol_budget <= 0:
+        reasons.append("non_symbol_budget<=0")
+    if effective_budget <= 0:
+        reasons.append("effective_budget<=0")
+    if ask_for_sizing <= 0:
+        reasons.append("ask_for_sizing<=0")
+    if max_budget_shares < 1:
+        reasons.append("budget_allows_0_shares")
+    if max_symbol_cap_shares < 1:
+        reasons.append("symbol_cap_allows_0_shares")
+    if final_qty <= 0 and not reasons:
+        reasons.append("stage_fraction_rounded_to_0")
+    return ",".join(reasons) if reasons else "final_qty_positive"
+
+def _log_budget_diag(
+    *,
+    symbol: str,
+    ask_price,
+    cash_available: float,
+    cash_reserve: float,
+    cash_after_reserve: float,
+    equity: float,
+    gross_mv: float,
+    exp_cap_limit: float,
+    global_cap_remaining: float,
+    symbol_current_mv: float,
+    symbol_cap_pct: float,
+    symbol_cap_limit: float,
+    symbol_cap_headroom: float,
+    daily_remaining: float,
+    stage_frac: float,
+    raw_stage_shares: float,
+    max_budget_shares: int,
+    max_symbol_cap_shares: int,
+    final_qty: int,
+    effective_budget: float,
+    non_symbol_budget: float,
+    reason: str | None = None,
+) -> None:
+    ask_for_reason = _f(ask_price, 0.0)
+    exact_reason = reason or _budget_zero_reason(
+        cash_after_reserve=_f(cash_after_reserve, 0.0),
+        non_symbol_budget=_f(non_symbol_budget, 0.0),
+        global_cap_remaining=_f(global_cap_remaining, float("inf")),
+        symbol_cap_headroom=_f(symbol_cap_headroom, float("inf")),
+        daily_remaining=_f(daily_remaining, float("inf")),
+        effective_budget=_f(effective_budget, 0.0),
+        ask_for_sizing=ask_for_reason,
+        max_budget_shares=int(max_budget_shares or 0),
+        max_symbol_cap_shares=int(max_symbol_cap_shares or 0),
+        final_qty=int(final_qty or 0),
+    )
+    exposure_pct = (gross_mv / equity) if _finite(equity) and equity > 0 else 0.0
+    print(
+        f"[BUDGET-DIAG] "
+        f"symbol={symbol} "
+        f"ask={_fmt_final_value(ask_price)} "
+        f"cash_available={_fmt_final_value(cash_available, money=True)} "
+        f"cash_reserve={_fmt_final_value(cash_reserve, money=True)} "
+        f"cash_after_reserve={_fmt_final_value(cash_after_reserve, money=True)} "
+        f"account_equity={_fmt_final_value(equity, money=True)} "
+        f"current_invested_exposure_pct={_fmt_final_value(exposure_pct * 100.0, digits=2)}% "
+        f"exp_cap_limit={_fmt_final_value(exp_cap_limit * 100.0, digits=2)}% "
+        f"global_cap_remaining={_fmt_final_value(global_cap_remaining, money=True)} "
+        f"symbol_current_mv={_fmt_final_value(symbol_current_mv, money=True)} "
+        f"symbol_cap_pct={_fmt_final_value(symbol_cap_pct * 100.0, digits=2)}% "
+        f"symbol_cap_dollar_limit={_fmt_final_value(symbol_cap_limit, money=True)} "
+        f"symbol_cap_headroom={_fmt_final_value(symbol_cap_headroom, money=True)} "
+        f"daily_allocation_remaining={_fmt_final_value(daily_remaining, money=True)} "
+        f"stage_frac={_fmt_final_value(stage_frac, digits=3)} "
+        f"raw_stage_shares={_fmt_final_value(raw_stage_shares, digits=4)} "
+        f"max_shares_allowed_by_budget={max_budget_shares} "
+        f"max_shares_allowed_by_symbol_cap={max_symbol_cap_shares} "
+        f"final_qty={final_qty} "
+        f"effective_budget={_fmt_final_value(effective_budget, money=True)} "
+        f"non_symbol_budget={_fmt_final_value(non_symbol_budget, money=True)} "
+        f"budget_zero_reason={exact_reason}"
+    )
 
 # ---------- light TA ----------
 def sma(vals, n):
@@ -1132,6 +1288,11 @@ def _run_unlocked(symbol: str,
         return mv
 
     gross_mv = estimate_gross_long_mv(account_hash, client.access_token)
+    global_cap_remaining_mv = (
+        max(0.0, (float(equity) * float(exp_cap)) - float(gross_mv))
+        if _finite(equity) and equity > 0 and _finite(gross_mv)
+        else float("inf")
+    )
     if _finite(equity) and equity > 0 and (gross_mv / equity) >= exp_cap * 0.999:
         print(f"[CAP] Gross long {gross_mv/equity:.1%} >= cap {exp_cap:.0%}; skip.")
         _log_final(symbol=stock, signal="HOLD", block="gross_cap", ask=ask)
@@ -1388,8 +1549,11 @@ def _run_unlocked(symbol: str,
         sym_headroom_mv_trigger = max(0.0, sym_mv_cap - current_mv) if math.isfinite(sym_mv_cap) else float('inf')
         cash_budget_trigger = max(0.0, (cash - CASH_BUFFER))
         headroom_combined_trigger = min(sym_headroom_mv_trigger, cash_budget_trigger)
+        trigger_non_symbol_budget = min(cash_budget_trigger, global_cap_remaining_mv)
 
         desired_shares = int(stage_usd / price_cap) if price_cap > 0 else 0
+        trigger_max_budget_shares = int(trigger_non_symbol_budget / price_cap) if price_cap > 0 else 0
+        trigger_max_symbol_cap_shares = int(sym_headroom_mv_trigger / price_cap) if price_cap > 0 and math.isfinite(sym_headroom_mv_trigger) else 10**9
         trigger_max_new_shares = int(headroom_combined_trigger / price_cap) if price_cap > 0 else 0
         trigger_raw_stage_shares = float(desired_shares)
 
@@ -1485,6 +1649,29 @@ def _run_unlocked(symbol: str,
                 _last_trade_ts[stock] = now_ts
 
         else:
+            _log_budget_diag(
+                symbol=stock,
+                ask_price=ask,
+                cash_available=cash,
+                cash_reserve=CASH_BUFFER,
+                cash_after_reserve=cash_budget_trigger,
+                equity=equity,
+                gross_mv=gross_mv,
+                exp_cap_limit=exp_cap,
+                global_cap_remaining=global_cap_remaining_mv,
+                symbol_current_mv=current_mv,
+                symbol_cap_pct=sym_cap_eff,
+                symbol_cap_limit=sym_mv_cap,
+                symbol_cap_headroom=sym_headroom_mv_trigger,
+                daily_remaining=float("inf"),
+                stage_frac=trigger_frac,
+                raw_stage_shares=trigger_raw_stage_shares,
+                max_budget_shares=trigger_max_budget_shares,
+                max_symbol_cap_shares=trigger_max_symbol_cap_shares,
+                final_qty=0,
+                effective_budget=headroom_combined_trigger,
+                non_symbol_budget=trigger_non_symbol_budget,
+            )
             _log_final(
                 symbol=stock, signal="HOLD", block="no_viable_size",
                 ask=ask, effective_budget=headroom_combined_trigger,
@@ -1520,6 +1707,12 @@ def _run_unlocked(symbol: str,
         dd=dd_down,
         brake_on=brake_on
     )
+    daily_budget_limit = daily_remaining if math.isfinite(daily_remaining) else float("inf")
+    brake_budget_limit = brake_budget if math.isfinite(brake_budget) else float("inf")
+    non_symbol_budget = min(cash_after_reserve, daily_budget_limit, brake_budget_limit, global_cap_remaining_mv)
+    budget_override = _budget_override_from_anywhere()
+    if budget_override is not None:
+        non_symbol_budget = min(non_symbol_budget, float(budget_override))
 
     # --- Stage sizing helper ---
     def compute_stage_frac(idx: int) -> float:
@@ -1540,8 +1733,33 @@ def _run_unlocked(symbol: str,
         hold_stage_frac = compute_stage_frac(next_stage_idx) if N else 0.0
         hold_effective_budget = max(0.0, min(sym_headroom_mv_now, cash_after_reserve, float(eff_budget)))
         hold_ask_for_sizing = ask if _finite(ask) and ask > 0 else _est_price
+        hold_max_budget_shares = int(non_symbol_budget / hold_ask_for_sizing) if hold_ask_for_sizing > 0 else 0
+        hold_max_symbol_cap_shares = int(sym_headroom_mv_now / hold_ask_for_sizing) if hold_ask_for_sizing > 0 and math.isfinite(sym_headroom_mv_now) else 10**9
         hold_max_new_shares = int(hold_effective_budget / hold_ask_for_sizing) if hold_ask_for_sizing > 0 else 0
         hold_raw_stage_shares = hold_max_new_shares * hold_stage_frac
+        _log_budget_diag(
+            symbol=stock,
+            ask_price=ask,
+            cash_available=cash,
+            cash_reserve=CASH_BUFFER,
+            cash_after_reserve=cash_after_reserve,
+            equity=equity,
+            gross_mv=gross_mv,
+            exp_cap_limit=exp_cap,
+            global_cap_remaining=global_cap_remaining_mv,
+            symbol_current_mv=qty_owned * hold_ask_for_sizing,
+            symbol_cap_pct=sym_cap_eff,
+            symbol_cap_limit=sym_mv_cap,
+            symbol_cap_headroom=sym_headroom_mv_now,
+            daily_remaining=daily_remaining,
+            stage_frac=hold_stage_frac,
+            raw_stage_shares=hold_raw_stage_shares,
+            max_budget_shares=hold_max_budget_shares,
+            max_symbol_cap_shares=hold_max_symbol_cap_shares,
+            final_qty=0,
+            effective_budget=hold_effective_budget,
+            non_symbol_budget=non_symbol_budget,
+        )
         _log_final(
             symbol=stock, signal="HOLD", block=primary_block,
             final_qty=0, ask=ask, effective_budget=hold_effective_budget,
@@ -1606,6 +1824,8 @@ def _run_unlocked(symbol: str,
         effective_budget = max(0.0, min(sym_headroom_mv, cash_budget, float(eff_budget)))
 
         ask_for_sizing = ask if _finite(ask) and ask > 0 else price_cap
+        max_budget_shares = int(non_symbol_budget / ask_for_sizing) if ask_for_sizing > 0 else 0
+        max_symbol_cap_shares = int(sym_headroom_mv / ask_for_sizing) if ask_for_sizing > 0 and math.isfinite(sym_headroom_mv) else 10**9
         max_new_shares = int(effective_budget / ask_for_sizing) if ask_for_sizing > 0 else 0
 
         stage_frac = compute_stage_frac(next_idx)
@@ -1627,6 +1847,29 @@ def _run_unlocked(symbol: str,
                 f"[SKIP] {stock} no viable size "
                 f"(effective_budget=${effective_budget:.2f}, ask={ask_for_sizing:.2f}, "
                 f"cash={cash:.2f}, sym_cap={sym_cap_eff:.0%})."
+            )
+            _log_budget_diag(
+                symbol=stock,
+                ask_price=ask,
+                cash_available=cash,
+                cash_reserve=CASH_BUFFER,
+                cash_after_reserve=cash_after_reserve,
+                equity=equity,
+                gross_mv=gross_mv,
+                exp_cap_limit=exp_cap,
+                global_cap_remaining=global_cap_remaining_mv,
+                symbol_current_mv=current_mv,
+                symbol_cap_pct=sym_cap_eff,
+                symbol_cap_limit=sym_mv_cap,
+                symbol_cap_headroom=sym_headroom_mv,
+                daily_remaining=daily_remaining,
+                stage_frac=stage_frac,
+                raw_stage_shares=raw_stage_shares,
+                max_budget_shares=max_budget_shares,
+                max_symbol_cap_shares=max_symbol_cap_shares,
+                final_qty=0,
+                effective_budget=effective_budget,
+                non_symbol_budget=non_symbol_budget,
             )
             _log_final(
                 symbol=stock, signal="HOLD", block="no_viable_size",
@@ -1761,6 +2004,8 @@ def run(*args, **kwargs):
             print(f"[AUTH] Schwab auth interrupted {symbol or 'UNKNOWN'} pass; releasing lock.")
             sig = _token_file_signature(TOKENS_FILE)
             _wait_for_manual_reauth(str(e), previous_signature=sig)
+        except SchwabUnavailable:
+            return
 
 def wait_for_fill(client, account_hash, order_id, timeout_sec=45, interval_sec=3):
     deadline = _time.time() + timeout_sec
@@ -1893,7 +2138,10 @@ def main():
         if not app_key or not app_secret:
             print("[ERR] Set env vars app_key/app_secret before running.")
             return
-        client_hist = wait_for_schwab_client(app_key, app_secret, label="history client")
+        try:
+            client_hist = wait_for_schwab_client(app_key, app_secret, label="history client")
+        except SchwabUnavailable:
+            return
 
         atrk_file_map = load_atrk_overrides(getattr(a, "atrk_file", ATRK_OVERRIDES_FILE))
 
@@ -2004,7 +2252,12 @@ def main():
                 print(f"[AUTH] {sym}: Schwab auth required during pass.")
                 sig = _token_file_signature(TOKENS_FILE)
                 _wait_for_manual_reauth(str(e), previous_signature=sig)
-                client_hist = wait_for_schwab_client(app_key, app_secret, label="history client")
+                try:
+                    client_hist = wait_for_schwab_client(app_key, app_secret, label="history client")
+                except SchwabUnavailable:
+                    return
+            except SchwabUnavailable:
+                return
             except Exception as e:
                 print(f"[WARN] {sym}: pass failed: {e}")
             _time.sleep(0.5)

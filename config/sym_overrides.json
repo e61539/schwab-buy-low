@@ -11,5 +11,14 @@
   },
   "GLD": {
     "exp_cap": 0.10
+  },
+  "AAPL": {
+    "exp_cap": 0.08
+  },
+  "NVDA": {
+    "exp_cap": 0.06
+  },
+  "MSFT": {
+    "exp_cap": 0.06
   }
 }
