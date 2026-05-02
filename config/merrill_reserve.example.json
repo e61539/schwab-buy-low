@@ -1,0 +1,19 @@
+{
+  "as_of": "2026-05-02T09:30:00-04:00",
+  "account_label": "Merrill Edge Reserve",
+  "cash_available": 0.0,
+  "holdings": [
+    {
+      "symbol": "Money Market",
+      "market_value": 0.0,
+      "available_for_funding": true,
+      "priority": 0
+    },
+    {
+      "symbol": "BSV",
+      "market_value": 0.0,
+      "available_for_funding": true,
+      "priority": 1
+    }
+  ]
+}

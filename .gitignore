@@ -10,6 +10,7 @@ config/tokens.txt
 config/tokens.json
 config/schwab_token.json
 config/acct.json
+config/merrill_reserve.json
 
 # Runtime state, logs, and locks
 runtime/*

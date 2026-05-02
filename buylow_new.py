@@ -53,6 +53,15 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from trade_logger import log_event, parse_order_id, extract_fill
 
+try:
+    from capital_readiness import write_capital_readiness
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        from capital_readiness import write_capital_readiness
+    except ImportError:
+        write_capital_readiness = None
+
 # ---------- float safety ----------
 def _finite(x) -> bool:
     try:
@@ -62,6 +71,24 @@ def _finite(x) -> bool:
 
 def _f(x, default=0.0) -> float:
     return float(x) if _finite(x) else float(default)
+
+def _write_capital_readiness_safe(**kwargs) -> None:
+    if write_capital_readiness is None:
+        return
+    try:
+        payload = write_capital_readiness(**kwargs)
+        blocked = payload.get("blocked_symbols", [])
+        source = ""
+        if blocked and isinstance(blocked[0], dict):
+            source = blocked[0].get("suggested_source_holding") or ""
+        print(
+            f"[CAPITAL-READINESS] advisory_only=true "
+            f"blocked_symbols={len(blocked)} "
+            f"merrill_reserve_available=${_f(payload.get('merrill_reserve_available'), 0.0):.2f} "
+            f"source={source or 'NA'}"
+        )
+    except Exception as e:
+        print(f"[WARN] capital readiness write failed: {e}")
 
 # ---------- rotating tee ----------
 class RotatingTee:
@@ -1649,6 +1676,54 @@ def _run_unlocked(symbol: str,
                 _last_trade_ts[stock] = now_ts
 
         else:
+            trigger_budget_zero_reason = _budget_zero_reason(
+                cash_after_reserve=_f(cash_budget_trigger, 0.0),
+                non_symbol_budget=_f(trigger_non_symbol_budget, 0.0),
+                global_cap_remaining=_f(global_cap_remaining_mv, float("inf")),
+                symbol_cap_headroom=_f(sym_headroom_mv_trigger, float("inf")),
+                daily_remaining=float("inf"),
+                effective_budget=_f(headroom_combined_trigger, 0.0),
+                ask_for_sizing=_f(price_cap, 0.0),
+                max_budget_shares=int(trigger_max_budget_shares or 0),
+                max_symbol_cap_shares=int(trigger_max_symbol_cap_shares or 0),
+                final_qty=0,
+            )
+            trigger_budget_related_block = any(
+                token in trigger_budget_zero_reason
+                for token in (
+                    "cash_after_reserve<=0",
+                    "non_symbol_budget<=0",
+                    "effective_budget<=0",
+                    "budget_allows_0_shares",
+                )
+            )
+            trigger_cap_related_block = any(
+                token in trigger_budget_zero_reason
+                for token in (
+                    "global_cap_remaining<=0",
+                    "symbol_cap_headroom<=0",
+                    "symbol_cap_allows_0_shares",
+                )
+            )
+            trigger_funding_needed = 0.0
+            if trigger_budget_related_block and not trigger_cap_related_block:
+                trigger_funding_needed = max(
+                    0.0,
+                    _f(price_cap, 0.0) - max(0.0, _f(trigger_non_symbol_budget, 0.0)),
+                )
+                min_usd_eff_trigger = _load_sym_min_usd(stock, min_usd)
+                if min_usd_eff_trigger:
+                    trigger_funding_needed = max(trigger_funding_needed, float(min_usd_eff_trigger))
+            _write_capital_readiness_safe(
+                symbol=stock,
+                block_reason=trigger_budget_zero_reason,
+                schwab_cash_available=cash,
+                schwab_budget_remaining=trigger_non_symbol_budget,
+                target_price=use_tp,
+                current_price=ask,
+                suggested_funding_needed=trigger_funding_needed,
+                manual_action_required=bool(trigger_funding_needed > 0.0),
+            )
             _log_budget_diag(
                 symbol=stock,
                 ask_price=ask,
@@ -1671,6 +1746,7 @@ def _run_unlocked(symbol: str,
                 final_qty=0,
                 effective_budget=headroom_combined_trigger,
                 non_symbol_budget=trigger_non_symbol_budget,
+                reason=trigger_budget_zero_reason,
             )
             _log_final(
                 symbol=stock, signal="HOLD", block="no_viable_size",
@@ -1843,6 +1919,54 @@ def _run_unlocked(symbol: str,
         )
 
         if max_new_shares < 1:
+            budget_zero_reason = _budget_zero_reason(
+                cash_after_reserve=_f(cash_after_reserve, 0.0),
+                non_symbol_budget=_f(non_symbol_budget, 0.0),
+                global_cap_remaining=_f(global_cap_remaining_mv, float("inf")),
+                symbol_cap_headroom=_f(sym_headroom_mv, float("inf")),
+                daily_remaining=_f(daily_remaining, float("inf")),
+                effective_budget=_f(effective_budget, 0.0),
+                ask_for_sizing=_f(ask_for_sizing, 0.0),
+                max_budget_shares=int(max_budget_shares or 0),
+                max_symbol_cap_shares=int(max_symbol_cap_shares or 0),
+                final_qty=0,
+            )
+            budget_related_block = any(
+                token in budget_zero_reason
+                for token in (
+                    "cash_after_reserve<=0",
+                    "daily_allocation_remaining<=0",
+                    "non_symbol_budget<=0",
+                    "effective_budget<=0",
+                    "budget_allows_0_shares",
+                )
+            )
+            cap_related_block = any(
+                token in budget_zero_reason
+                for token in (
+                    "global_cap_remaining<=0",
+                    "symbol_cap_headroom<=0",
+                    "symbol_cap_allows_0_shares",
+                )
+            )
+            suggested_funding_needed = 0.0
+            if budget_related_block and not cap_related_block:
+                suggested_funding_needed = max(
+                    0.0,
+                    _f(ask_for_sizing, 0.0) - max(0.0, _f(non_symbol_budget, 0.0)),
+                )
+                if min_usd_eff:
+                    suggested_funding_needed = max(suggested_funding_needed, float(min_usd_eff))
+            _write_capital_readiness_safe(
+                symbol=stock,
+                block_reason=budget_zero_reason,
+                schwab_cash_available=cash,
+                schwab_budget_remaining=non_symbol_budget,
+                target_price=use_tp,
+                current_price=ask,
+                suggested_funding_needed=suggested_funding_needed,
+                manual_action_required=bool(suggested_funding_needed > 0.0),
+            )
             print(
                 f"[SKIP] {stock} no viable size "
                 f"(effective_budget=${effective_budget:.2f}, ask={ask_for_sizing:.2f}, "
@@ -1870,6 +1994,7 @@ def _run_unlocked(symbol: str,
                 final_qty=0,
                 effective_budget=effective_budget,
                 non_symbol_budget=non_symbol_budget,
+                reason=budget_zero_reason,
             )
             _log_final(
                 symbol=stock, signal="HOLD", block="no_viable_size",
