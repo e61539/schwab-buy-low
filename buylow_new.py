@@ -181,6 +181,7 @@ CONNECT_TIMEOUT = 10
 READ_TIMEOUT    = 30
 CASH_BUFFER     = 25.00
 AUTH_STATUS_FILE = os.getenv("BUYLOW_AUTH_STATUS_FILE", r"C:\temp\schwab_auth_status.json")
+ACCOUNT_SNAPSHOT_FILE = os.getenv("BUYLOW_ACCOUNT_SNAPSHOT_FILE", r"C:\temp\buylow_account_snapshot.json")
 SCHWAB_REFRESH_MAX_AGE = timedelta(days=7)
 SCHWAB_REFRESH_REAUTH_MARGIN = timedelta(minutes=5)
 TOKEN_REAUTH_POLL_SEC = max(1, int(os.getenv("BUYLOW_REAUTH_POLL_SEC", "10")))
@@ -867,13 +868,18 @@ def warn_if_refresh_stale(tokens_path=TOKENS_FILE, days=6):
         pass
 
 def _load_acct_map(path: str) -> dict:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            m = json.load(f)
-        if isinstance(m, dict):
-            return {k.upper(): str(v) for k, v in m.items()}
-    except Exception:
-        pass
+    paths = [path]
+    temp_path = r"C:\temp\acct.json"
+    if str(path).lower() != temp_path.lower():
+        paths.append(temp_path)
+    for candidate_path in paths:
+        try:
+            with open(candidate_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+            if isinstance(m, dict):
+                return {k.upper(): str(v) for k, v in m.items()}
+        except Exception:
+            pass
     return {}
 
 def select_account_hash(client, acct_arg: str, acct_file: str) -> tuple[str, str]:
@@ -881,6 +887,7 @@ def select_account_hash(client, acct_arg: str, acct_file: str) -> tuple[str, str
     if not wanted:
         raise RuntimeError("--acct is required")
     acct_map = _load_acct_map(acct_file)
+    original_wanted = wanted
     if wanted.upper() in acct_map:
         wanted = acct_map[wanted.upper()]
     wanted_norm  = _normalize_acct_str(wanted)
@@ -904,6 +911,13 @@ def select_account_hash(client, acct_arg: str, acct_file: str) -> tuple[str, str
         raise RuntimeError("No linked accounts found.")
     candidates.sort(key=lambda x: x[0], reverse=True)
     best = candidates[0]
+    if best[0] <= 0:
+        labels = [f"{accnum} {disp}".strip() for _score, _hval, accnum, disp in candidates]
+        available = ", ".join(labels) if labels else "none"
+        raise RuntimeError(
+            f"No linked account matched --acct {original_wanted!r} resolved to {wanted!r}. "
+            f"Available linked accounts: {available}"
+        )
     acct_hash = best[1]
     label = f"{best[2]} {best[3]}".strip()
     return acct_hash, label
@@ -930,6 +944,100 @@ def _all_positions_list(payload) -> list:
             positions.extend(sa.get("positions", []) or [])
     return positions
 
+def _first_finite_number(*values):
+    for value in values:
+        if _finite(value):
+            return float(value)
+    return None
+
+def _extract_securities_account(payload) -> dict:
+    if isinstance(payload, dict):
+        return payload.get("securitiesAccount", payload) or {}
+    if isinstance(payload, list) and payload:
+        first = payload[0]
+        if isinstance(first, dict):
+            return first.get("securitiesAccount", first) or {}
+    return {}
+
+def _balance_sections(acct: dict) -> tuple[dict, dict, dict]:
+    current = acct.get("currentBalances", {}) or {}
+    initial = acct.get("initialBalances", {}) or {}
+    projected = acct.get("projectedBalances", {}) or {}
+    return current, initial, projected
+
+def _parse_cash_equity_from_account(acct: dict) -> tuple[float | None, float | None, dict]:
+    current, initial, projected = _balance_sections(acct)
+
+    settled_cash = _first_finite_number(
+        current.get("settledCash"),
+        current.get("cashBalance"),
+        initial.get("cashBalance"),
+        initial.get("cashAvailable"),
+    )
+    cash = _first_finite_number(
+        current.get("cashAvailableForTrading"),
+        current.get("cashAvailableForWithdrawal"),
+        current.get("availableFundsNonMarginableTrade"),
+        current.get("availableFunds"),
+        current.get("cashBalance"),
+        initial.get("cashAvailable"),
+        initial.get("availableFundsNonMarginableTrade"),
+        settled_cash,
+    )
+    equity = _first_finite_number(
+        current.get("liquidationValue"),
+        projected.get("liquidationValue"),
+        initial.get("accountValue"),
+        current.get("equity"),
+        current.get("accountValue"),
+    )
+    detail = {
+        "current_balance_keys": sorted(current.keys()),
+        "initial_balance_keys": sorted(initial.keys()),
+        "projected_balance_keys": sorted(projected.keys()),
+        "settled_cash": settled_cash,
+        "cash_available": cash,
+        "liquidation_value": equity,
+    }
+    return cash, equity, detail
+
+def _position_market_value_by_symbol(acct: dict) -> dict:
+    out = {}
+    for p in _all_positions_list({"securitiesAccount": acct}):
+        instr = p.get("instrument", {}) or {}
+        sym = str(instr.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        out[sym] = out.get(sym, 0.0) + _f(p.get("marketValue"), 0.0)
+    return out
+
+def _write_account_snapshot_safe(*, account_hash: str, acct_label: str, source: str, cash, equity, detail: dict, acct: dict) -> None:
+    try:
+        positions_mv = _position_market_value_by_symbol(acct)
+        swvxx_value = positions_mv.get("SWVXX", 0.0)
+        invested_ex_swvxx = sum(v for k, v in positions_mv.items() if k != "SWVXX")
+        payload = {
+            "generated_at": datetime.now(TZ).isoformat(timespec="seconds"),
+            "source": source,
+            "account_label": acct_label,
+            "account_hash_suffix": str(account_hash)[-6:],
+            "cash_available": round(_f(cash, 0.0), 2),
+            "account_equity": round(_f(equity, 0.0), 2),
+            "balance_parse_detail": detail,
+            "position_market_value_ex_swvxx": round(invested_ex_swvxx, 2),
+            "swvxx_market_value": round(swvxx_value, 2),
+            "position_symbols": sorted(positions_mv.keys()),
+            "manual_actions_only": True,
+        }
+        os.makedirs(os.path.dirname(ACCOUNT_SNAPSHOT_FILE), exist_ok=True)
+        tmp = ACCOUNT_SNAPSHOT_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, ACCOUNT_SNAPSHOT_FILE)
+    except Exception as e:
+        print(f"[WARN] account snapshot write failed: {e}")
+
 def get_long_qty(account_hash: str, access_token: str, symbol: str) -> float:
     data = positions_payload(account_hash, access_token)
     positions = _all_positions_list(data)
@@ -945,29 +1053,65 @@ def get_long_qty(account_hash: str, access_token: str, symbol: str) -> float:
             qty += float(p["quantity"])
     return qty
 
-def get_account_cash_and_equity(account_hash: str, access_token: str) -> tuple[float,float]:
+def _account_payload(account_hash: str, access_token: str, *, fields: str | None = None) -> dict:
     url = f"https://api.schwabapi.com/trader/v1/accounts/{account_hash}"
+    params = {"fields": fields} if fields else None
     r = session_with_retries().get(
-        url, params={"fields":"positions"},
+        url, params=params,
         headers={"Accept":"application/json","Authorization":f"Bearer {access_token}"},
         timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
     )
     _raise_if_auth_response(r)
     r.raise_for_status()
-    data = parse_json(r)
-    acct = data.get("securitiesAccount", data) if isinstance(data, dict) else (
-        data[0].get("securitiesAccount", {}) if isinstance(data, list) and data else {}
+    return parse_json(r)
+
+def get_account_cash_and_equity(account_hash: str, access_token: str, acct_label: str = "") -> tuple[float,float]:
+    attempts = []
+    for source, fields in (("account_details", None), ("account_details_positions", "positions")):
+        data = _account_payload(account_hash, access_token, fields=fields)
+        acct = _extract_securities_account(data)
+        cash, equity, detail = _parse_cash_equity_from_account(acct)
+        attempts.append({"source": source, "cash": cash, "equity": equity, "detail": detail})
+        if _finite(cash) and cash > 0 and _finite(equity) and equity > 0:
+            _write_account_snapshot_safe(
+                account_hash=account_hash,
+                acct_label=acct_label,
+                source=source,
+                cash=cash,
+                equity=equity,
+                detail=detail,
+                acct=acct,
+            )
+            return float(cash), float(equity)
+
+    # Use the best parsed values even if one of them is zero, but leave a snapshot
+    # so budget=0 cases are diagnosable without changing trading behavior.
+    best = attempts[0] if attempts else {"source": "none", "cash": 0.0, "equity": 0.0, "detail": {}}
+    for item in attempts:
+        if _f(item.get("cash"), 0.0) + _f(item.get("equity"), 0.0) > _f(best.get("cash"), 0.0) + _f(best.get("equity"), 0.0):
+            best = item
+    try:
+        data = _account_payload(account_hash, access_token, fields="positions")
+        acct = _extract_securities_account(data)
+    except Exception:
+        acct = {}
+    detail = dict(best.get("detail") or {})
+    detail["attempts"] = attempts
+    _write_account_snapshot_safe(
+        account_hash=account_hash,
+        acct_label=acct_label,
+        source=str(best.get("source") or "unknown"),
+        cash=best.get("cash"),
+        equity=best.get("equity"),
+        detail=detail,
+        acct=acct,
     )
-    balances = acct.get("currentBalances", {})
-    cash = None
-    for key in ("cashAvailableForTrading","cashBalance","availableFunds"):
-        v = balances.get(key)
-        if v is not None: cash = float(v); break
-    equity = None
-    for k in ("liquidationValue","equity","accountValue"):
-        v = balances.get(k)
-        if v is not None: equity = float(v); break
-    return (cash or 0.0), (equity or 0.0)
+    print(
+        f"[WARN] Parsed Schwab account cash/equity is zero or incomplete: "
+        f"cash={_f(best.get('cash'), 0.0):.2f} equity={_f(best.get('equity'), 0.0):.2f}. "
+        f"Snapshot={ACCOUNT_SNAPSHOT_FILE}"
+    )
+    return _f(best.get("cash"), 0.0), _f(best.get("equity"), 0.0)
 
 # ---------- history/ATR/regime ----------
 def _history_via_client(client, symbol):
@@ -1228,7 +1372,7 @@ def _run_unlocked(symbol: str,
         print("[ERROR] Could not select account:", e)
         return
 
-    cash, equity = get_account_cash_and_equity(account_hash, client.access_token)
+    cash, equity = get_account_cash_and_equity(account_hash, client.access_token, acct_label=acct_label)
 
     regime_up, daily_atr, prev_close_regime = get_regime_and_atr(client, regime_symbol, symbol_for_atr=stock)
 

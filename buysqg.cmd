@@ -35,7 +35,7 @@ set "TZ=America/Detroit"
 set "HOURS=regular"
 set "ORDER_STYLE=limit"
 set "MAX_SLIPPAGE=0.003"
-set "EXPOSURE_OPTS=--exp-cap 0.70"
+set "EXPOSURE_OPTS=--exp-cap 0.72"
 
 REM ---------- Policy / brakes / guards ----------
 set "SOFT=8"
