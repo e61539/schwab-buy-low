@@ -1639,7 +1639,7 @@ def _run_unlocked(symbol: str,
     if not regime_up:
         primary_block = "regime"
     elif not meets_target:
-        primary_block = "target"
+        primary_block = "strict-atr" if strict_atr else "atr"
     elif bps > allowed_bps:
         primary_block = "spread"
     elif _finite(cap_headroom) and cap_headroom <= 0:
@@ -1957,6 +1957,46 @@ def _run_unlocked(symbol: str,
         hold_max_symbol_cap_shares = int(sym_headroom_mv_now / hold_ask_for_sizing) if hold_ask_for_sizing > 0 and math.isfinite(sym_headroom_mv_now) else 10**9
         hold_max_new_shares = int(hold_effective_budget / hold_ask_for_sizing) if hold_ask_for_sizing > 0 else 0
         hold_raw_stage_shares = hold_max_new_shares * hold_stage_frac
+        hold_budget_zero_reason = _budget_zero_reason(
+            cash_after_reserve=_f(cash_after_reserve, 0.0),
+            non_symbol_budget=_f(non_symbol_budget, 0.0),
+            global_cap_remaining=_f(global_cap_remaining_mv, float("inf")),
+            symbol_cap_headroom=_f(sym_headroom_mv_now, float("inf")),
+            daily_remaining=_f(daily_remaining, float("inf")),
+            effective_budget=_f(hold_effective_budget, 0.0),
+            ask_for_sizing=_f(hold_ask_for_sizing, 0.0),
+            max_budget_shares=int(hold_max_budget_shares or 0),
+            max_symbol_cap_shares=int(hold_max_symbol_cap_shares or 0),
+            final_qty=0,
+        )
+        hold_secondary_blocks = []
+        if any(
+            token in hold_budget_zero_reason
+            for token in (
+                "cash_after_reserve<=0",
+                "daily_allocation_remaining<=0",
+                "non_symbol_budget<=0",
+                "effective_budget<=0",
+                "budget_allows_0_shares",
+            )
+        ):
+            hold_secondary_blocks.append("budget")
+        if any(
+            token in hold_budget_zero_reason
+            for token in (
+                "global_cap_remaining<=0",
+                "symbol_cap_headroom<=0",
+                "symbol_cap_allows_0_shares",
+            )
+        ):
+            hold_secondary_blocks.append("cap")
+        if primary_block in ("atr", "strict-atr") and hold_secondary_blocks:
+            print(
+                f"[BLOCK-REASONS] symbol={stock} primary={primary_block} "
+                f"secondary={','.join(hold_secondary_blocks)} "
+                f"ask={ask:.2f} target={use_tp:.2f} "
+                f"budget_zero_reason={hold_budget_zero_reason}"
+            )
         _log_budget_diag(
             symbol=stock,
             ask_price=ask,
@@ -1979,6 +2019,7 @@ def _run_unlocked(symbol: str,
             final_qty=0,
             effective_budget=hold_effective_budget,
             non_symbol_budget=non_symbol_budget,
+            reason=hold_budget_zero_reason,
         )
         _log_final(
             symbol=stock, signal="HOLD", block=primary_block,
