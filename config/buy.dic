@@ -17,12 +17,12 @@
   "AAPL": [
     {"thr": 3, "frac": 0.25},
     {"thr": 6, "frac": 0.35},
-    {"thr": 9, "frac": 0.40}
+    {"thr": 10, "frac": 0.40}
   ],
   "NVDA": [
-    {"thr": 4, "frac": 0.25},
-    {"thr": 7, "frac": 0.35},
-    {"thr": 11, "frac": 0.40}
+    {"thr": 5, "frac": 0.30},
+    {"thr": 9, "frac": 0.35},
+    {"thr": 14, "frac": 0.35}
   ],
   "MSFT": [
     {"thr": 4, "frac": 0.25},

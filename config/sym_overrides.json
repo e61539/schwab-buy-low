@@ -13,12 +13,12 @@
     "exp_cap": 0.10
   },
   "AAPL": {
-    "exp_cap": 0.08
+    "exp_cap": 0.02
   },
   "NVDA": {
-    "exp_cap": 0.06
+    "exp_cap": 0.04
   },
   "MSFT": {
-    "exp_cap": 0.06
+    "exp_cap": 0.03
   }
 }
