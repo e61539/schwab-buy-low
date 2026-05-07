@@ -1,11 +1,21 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyc
 .venv/
 venv/
 
 # Local credentials and broker tokens
 .env
+*.env
+*api_key*
+*apikey*
+*secret*
+*token*
+tokens.txt
+tokens.json
+schwab_token.json
+acct.json
 config/tokens.txt
 config/tokens.json
 config/schwab_token.json
@@ -19,6 +29,15 @@ runtime/*
 !runtime/logs/.gitkeep
 !runtime/locks/
 !runtime/locks/.gitkeep
+!runtime/cache/
+!runtime/cache/.gitkeep
+!runtime/state/
+!runtime/state/.gitkeep
+runtime/**/*.log
+runtime/**/*.lock
+runtime/**/*.csv
+runtime/**/*.json
+runtime/**/*.pyc
 
 # Large/generated data
 *.log
@@ -26,6 +45,7 @@ runtime/*
 *.zip
 *.bak
 *.tmp
+*.lock
 
 # OS/editor
 .DS_Store
