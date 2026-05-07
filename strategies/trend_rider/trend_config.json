@@ -1,0 +1,7 @@
+{
+  "mode": "proposal_only",
+  "manual_actions_only": true,
+  "live_orders_enabled": false,
+  "symbols": [],
+  "notes": "Placeholder only. Do not place live orders from Trend Rider."
+}

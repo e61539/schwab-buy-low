@@ -1,0 +1,39 @@
+{
+  "DEFAULT": [{ "thr": 5.0, "frac": 1.00, "cooldown_sec": 900 }],
+
+  "SPY":  [{ "thr": 4.0, "frac": 1.00, "cooldown_sec": 900 }],
+  "QQQ":  [{ "thr": 5.0, "frac": 1.00, "cooldown_sec": 900 }],
+  "DIA":  [{ "thr": 4.5, "frac": 1.00, "cooldown_sec": 900 }],
+  "IWM":  [{ "thr": 5.5, "frac": 1.00, "cooldown_sec": 900 }],
+  "COST": [{ "thr": 4.5, "frac": 1.00, "cooldown_sec": 900 }],
+  "GLD":  [{ "thr": 5.0, "frac": 1.00, "cooldown_sec": 900 }],
+
+  "BSV":  [{ "thr": 1.5, "frac": 1.00, "cooldown_sec": 3600 }],
+  "SHV":  [{ "thr": 1.0, "frac": 1.00, "cooldown_sec": 3600 }],
+  "VGIT": [{ "thr": 1.8, "frac": 1.00, "cooldown_sec": 3600 }],
+
+  "NVDA": [
+    { "thr": 7.0,  "frac": 0.50, "cooldown_sec": 900 },
+    { "thr": 12.0, "frac": 1.00, "cooldown_sec": 0 }
+  ],
+  "MSFT": [
+    { "thr": 6.0,  "frac": 0.50, "cooldown_sec": 900 },
+    { "thr": 10.0, "frac": 1.00, "cooldown_sec": 0 }
+  ],
+  "AMZN": [
+    { "thr": 6.5,  "frac": 0.50, "cooldown_sec": 900 },
+    { "thr": 11.0, "frac": 1.00, "cooldown_sec": 0 }
+  ],
+  "TSLA": [
+    { "thr": 8.0,  "frac": 0.50, "cooldown_sec": 900 },
+    { "thr": 14.0, "frac": 1.00, "cooldown_sec": 0 }
+  ],
+  "IBIT": [
+    { "thr": 10.0, "frac": 0.50, "cooldown_sec": 900 },
+    { "thr": 18.0, "frac": 1.00, "cooldown_sec": 0 }
+  ],
+  "EETH": [
+    { "thr": 9.0,  "frac": 0.50, "cooldown_sec": 900 },
+    { "thr": 16.0, "frac": 1.00, "cooldown_sec": 0 }
+  ]
+}
