@@ -2,6 +2,100 @@
   "mode": "proposal_only",
   "manual_actions_only": true,
   "live_orders_enabled": false,
-  "symbols": [],
-  "notes": "Placeholder only. Do not place live orders from Trend Rider."
+  "watchlist": [
+    "SPY",
+    "QQQ",
+    "MSFT",
+    "NVDA",
+    "AVGO",
+    "META",
+    "TSM",
+    "COST",
+    "GLD"
+  ],
+  "max_proposals": 3,
+  "min_score": 70,
+  "cooldown_days": 10,
+  "recent_purchase_penalty_days": 30,
+  "default_proposal_pct": 0.005,
+  "account_value_for_sizing": 100000,
+  "min_bars": 80,
+  "max_data_age_days": 9999,
+  "min_avg_dollar_volume": 1000000000,
+  "max_spread_bps": 15,
+  "default_spread_bps": 12,
+  "max_atr_pct": 0.045,
+  "max_recent_abs_daily_move": 0.035,
+  "sector_caps": {
+    "DEFAULT": 2,
+    "Technology": 2,
+    "Semiconductors": 1,
+    "ETF": 2
+  },
+  "symbol_metadata": {
+    "SPY": {
+      "sector": "ETF",
+      "liquidity": {
+        "avg_dollar_volume": 35000000000,
+        "spread_bps": 1
+      }
+    },
+    "QQQ": {
+      "sector": "ETF",
+      "liquidity": {
+        "avg_dollar_volume": 20000000000,
+        "spread_bps": 1
+      }
+    },
+    "MSFT": {
+      "sector": "Technology",
+      "liquidity": {
+        "avg_dollar_volume": 9000000000,
+        "spread_bps": 2
+      }
+    },
+    "NVDA": {
+      "sector": "Semiconductors",
+      "liquidity": {
+        "avg_dollar_volume": 30000000000,
+        "spread_bps": 3
+      }
+    },
+    "AVGO": {
+      "sector": "Semiconductors",
+      "liquidity": {
+        "avg_dollar_volume": 5000000000,
+        "spread_bps": 4
+      }
+    },
+    "META": {
+      "sector": "Communication Services",
+      "liquidity": {
+        "avg_dollar_volume": 10000000000,
+        "spread_bps": 2
+      }
+    },
+    "TSM": {
+      "sector": "Semiconductors",
+      "liquidity": {
+        "avg_dollar_volume": 2500000000,
+        "spread_bps": 5
+      }
+    },
+    "COST": {
+      "sector": "Consumer Staples",
+      "liquidity": {
+        "avg_dollar_volume": 2500000000,
+        "spread_bps": 4
+      }
+    },
+    "GLD": {
+      "sector": "ETF",
+      "liquidity": {
+        "avg_dollar_volume": 2500000000,
+        "spread_bps": 2
+      }
+    }
+  },
+  "notes": "Trend Rider is proposal-only. No live orders are placed."
 }

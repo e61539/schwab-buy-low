@@ -19,6 +19,8 @@ from typing import Optional, Dict, Any, List
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Request, Query
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 # ============================================================
@@ -75,6 +77,23 @@ logger = logging.getLogger("trade_server")
 app = FastAPI(title="Trade Server", version="2.7.0")
 
 _WINERROR64_LAST_LOG_TS = 0.0
+
+
+def _safe_order_debug_body(body: Any) -> dict:
+    """Log request shape for order debugging without secrets or API keys."""
+    if not isinstance(body, dict):
+        return {"body_type": type(body).__name__}
+    safe: dict[str, Any] = {}
+    for key in ("symbol", "side", "qty", "preview_id", "order_type"):
+        if key in body:
+            safe[key] = body.get(key)
+    if "confirm_code" in body:
+        safe["confirm_code_present"] = bool(str(body.get("confirm_code") or "").strip())
+        safe["confirm_code_len"] = len(str(body.get("confirm_code") or ""))
+    extra_keys = sorted(k for k in body.keys() if k not in safe and k != "confirm_code")
+    if extra_keys:
+        safe["extra_keys"] = extra_keys
+    return safe
 
 
 def _is_windows_accept_disconnect(exc: BaseException | None, message: str = "") -> bool:
@@ -427,12 +446,35 @@ def make_confirm_code() -> str:
     return str(secrets.randbelow(high - low + 1) + low)
 
 
-def require_allowed_symbol(symbol: str) -> None:
-    if symbol not in ALLOWED_SYMBOLS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Symbol {symbol} is not in ALLOWED_SYMBOLS"
-        )
+def _owned_position_symbols() -> set[str]:
+    try:
+        payload = run_positions_script(force_refresh=False)
+        rows = payload.get("positions", [])
+    except Exception as e:
+        logger.warning("SELL allowed-symbol ownership check failed: %s", e)
+        return set()
+    owned: set[str] = set()
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        sym = str(row.get("symbol") or row.get("instrument", {}).get("symbol") or "").strip().upper()
+        qty = safe_float(row.get("qty", row.get("quantity", row.get("longQuantity"))), 0.0) or 0.0
+        if sym and qty > 0:
+            owned.add(sym)
+    return owned
+
+
+def require_allowed_symbol(symbol: str, side: str = "BUY") -> None:
+    side = str(side or "").upper()
+    if symbol in ALLOWED_SYMBOLS:
+        return
+    if side == "SELL" and symbol in _owned_position_symbols():
+        logger.info("SELL symbol %s allowed because it is currently owned", symbol)
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=f"Symbol {symbol} is not in ALLOWED_SYMBOLS"
+    )
 
 
 def require_safe_qty_hard_limit(qty: int) -> None:
@@ -1214,6 +1256,31 @@ async def log_requests(request: Request, call_next):
         raise
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = getattr(exc, "body", None)
+    if request.url.path in {"/v1/orders/preview", "/v1/orders/confirm"}:
+        logger.warning(
+            "ORDER validation error path=%s errors=%s body=%s",
+            request.url.path,
+            exc.errors(),
+            _safe_order_debug_body(body),
+        )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if request.url.path in {"/v1/orders/preview", "/v1/orders/confirm"}:
+        logger.warning(
+            "ORDER request rejected path=%s status=%s detail=%s",
+            request.url.path,
+            exc.status_code,
+            exc.detail,
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 # ============================================================
 # Routes
 # ============================================================
@@ -1447,6 +1514,7 @@ def preview_order(
     x_api_key: Optional[str] = Header(default=None, alias="X-API-KEY"),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ) -> PreviewResponse:
+    logger.info("ORDER preview request body=%s", _safe_order_debug_body(req.model_dump()))
     require_api_key(x_api_key)
     cleanup_expired_previews()
     load_risk_config()
@@ -1458,7 +1526,7 @@ def preview_order(
     side = req.side
     qty = req.qty
 
-    require_allowed_symbol(symbol)
+    require_allowed_symbol(symbol, side)
     require_safe_qty_hard_limit(qty)
 
     idem_key = preview_idempotency_key(idempotency_key)
@@ -1527,6 +1595,7 @@ def confirm_order(
     x_api_key: Optional[str] = Header(default=None, alias="X-API-KEY"),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ) -> ConfirmResponse:
+    logger.info("ORDER confirm request body=%s", _safe_order_debug_body(req.model_dump()))
     require_api_key(x_api_key)
     cleanup_expired_previews()
 
@@ -1565,7 +1634,7 @@ def confirm_order(
     side = payload["side"]
     acct = payload["acct"]
 
-    require_allowed_symbol(symbol)
+    require_allowed_symbol(symbol, side)
     require_safe_qty_hard_limit(qty)
 
     cfg = load_risk_config()

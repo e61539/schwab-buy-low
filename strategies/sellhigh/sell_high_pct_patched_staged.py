@@ -17,6 +17,7 @@
 #   Disable: --vol-sell off   (default)
 
 import os, sys, json, time, math
+import hashlib
 from pathlib import Path
 from datetime import datetime, time as _time, timedelta
 from typing import Dict, List
@@ -84,6 +85,11 @@ DEFAULT_COOLDOWN_SEC = int(os.getenv("SELL_COOLDOWN_SEC", "600") or 600)
 DEFAULT_INTERVAL_SEC = int(os.getenv("SELL_INTERVAL_SEC", "60") or 60)
 CROSS_COOLDOWN_SEC   = int(os.getenv("CROSS_COOLDOWN_SEC", "120") or 120)
 SPREAD_MAX_PCT       = float(os.getenv("SPREAD_MAX_PCT", "1.0") or 1.0)
+AUTO_RESET_EXHAUSTED_STAGES = os.getenv("AUTO_RESET_EXHAUSTED_STAGES", "true").strip().lower() not in {"0", "false", "no", "off"}
+SELL_STAGE_RESET_QTY_INCREASE_PCT = float(os.getenv("SELL_STAGE_RESET_QTY_INCREASE_PCT", "5.0") or 5.0)
+SELL_STAGE_RESET_AVG_COST_PCT = float(os.getenv("SELL_STAGE_RESET_AVG_COST_PCT", "1.0") or 1.0)
+SELL_STAGE_RESET_MV_PCT = float(os.getenv("SELL_STAGE_RESET_MV_PCT", "5.0") or 5.0)
+SELL_STAGE_RESET_COOLDOWN_SEC = int(os.getenv("SELL_STAGE_RESET_COOLDOWN_SEC", "900") or 900)
 
 def _default_accounts_map() -> str:
     repo_map = CONFIG_DIR / "schwab_accounts.json"
@@ -561,34 +567,158 @@ def order_filled(order) -> bool:
 def _stage_state_file(sym: str) -> Path:
     return STATE_DIR / f"STAGES_{sym.upper()}.json"
 
+def _iso_now() -> str:
+    return _now_et().isoformat(timespec="seconds")
+
+def _stable_float(value, nd=4):
+    try:
+        return round(float(value), nd)
+    except Exception:
+        return None
+
+def _stages_signature(stages: list[dict]) -> str:
+    payload = []
+    for st in stages or []:
+        payload.append({
+            "thr_pct": _stable_float(st.get("thr_pct")),
+            "frac": _stable_float(st.get("frac")),
+            "cap_pct": _stable_float(st.get("cap_pct")),
+            "cap_abs": _stable_float(st.get("cap_abs")),
+            "cooldown_sec": st.get("cooldown_sec"),
+        })
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+def _position_signature(qty, avg_cost, market_value=None) -> str:
+    payload = {
+        "qty": _stable_float(qty, 4),
+        "avg_cost": _stable_float(avg_cost, 4),
+        "market_value": _stable_float(market_value, 2),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+def _normalize_stage_state(raw) -> dict:
+    if not isinstance(raw, dict):
+        raw = {}
+    fired = raw.get("fired_idxs", [])
+    if not isinstance(fired, list):
+        fired = []
+    out = dict(raw)
+    out["fired_idxs"] = sorted({int(x) for x in fired if str(x).strip().lstrip("-").isdigit()})
+    out.setdefault("last_qty", None)
+    out.setdefault("last_avg_cost", None)
+    out.setdefault("last_market_value", None)
+    out.setdefault("last_reset_ts", None)
+    out.setdefault("last_position_signature", None)
+    out.setdefault("position_signature", out.get("last_position_signature"))
+    out.setdefault("stage_signature", None)
+    out.setdefault("schema_version", 2)
+    return out
+
 def _load_stage_state(sym: str) -> dict:
     p = _stage_state_file(sym)
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        return _normalize_stage_state(json.loads(p.read_text(encoding="utf-8")))
     except Exception:
-        return {"fired_idxs": []}
+        return _normalize_stage_state({"fired_idxs": []})
 
-def _mark_stage_fired(sym: str, idx: int):
+def _write_stage_state(sym: str, state: dict):
     p = _stage_state_file(sym)
     p.parent.mkdir(parents=True, exist_ok=True)
-    st = _load_stage_state(sym)
-    if idx not in st.get("fired_idxs", []):
-        st.setdefault("fired_idxs", []).append(idx)
     try:
-        p.write_text(json.dumps(st, indent=0), encoding="utf-8")
+        p.write_text(json.dumps(_normalize_stage_state(state), indent=2, sort_keys=True), encoding="utf-8")
     except Exception:
         pass
 
-def _reset_stage_state(sym: str):
-    p = _stage_state_file(sym)
+def _update_stage_state_snapshot(sym: str, state: dict, qty, avg_cost, market_value, stages: list[dict]):
+    state = _normalize_stage_state(state)
+    state["last_qty"] = _stable_float(qty, 4)
+    state["last_avg_cost"] = _stable_float(avg_cost, 4)
+    state["last_market_value"] = _stable_float(market_value, 2)
+    state["last_position_signature"] = _position_signature(qty, avg_cost, market_value)
+    state["position_signature"] = state["last_position_signature"]
+    state["stage_signature"] = _stages_signature(stages)
+    _write_stage_state(sym, state)
+
+def _reset_cooldown_ok(state: dict, now_ts: float) -> bool:
+    ts = state.get("last_reset_ts")
+    if not ts:
+        return True
     try:
-        if p.exists():
-            p.unlink()
+        last = datetime.fromisoformat(str(ts)).timestamp()
+        return (now_ts - last) >= SELL_STAGE_RESET_COOLDOWN_SEC
     except Exception:
+        return True
+
+def _maybe_reset_exhausted_stage_state(sym: str, state: dict, stages: list[dict], pos_row: dict, *, last_price=None):
+    state = _normalize_stage_state(state)
+    fired = set(state.get("fired_idxs", []))
+    all_exhausted = bool(stages) and all(i in fired for i in range(len(stages)))
+    if not AUTO_RESET_EXHAUSTED_STAGES or not all_exhausted:
+        return state, False, ""
+
+    qty = float(pos_row.get("qty") or 0.0)
+    avg = float(pos_row.get("avg") or 0.0)
+    px = float(last_price or avg or 0.0)
+    market_value = qty * px if qty > 0 and px > 0 else None
+    now_ts = time.time()
+    if not _reset_cooldown_ok(state, now_ts):
+        return state, False, "reset cooldown active"
+
+    reasons = []
+    old_qty = state.get("last_qty")
+    old_avg = state.get("last_avg_cost")
+    old_mv = state.get("last_market_value")
+    old_stage_sig = state.get("stage_signature")
+    new_stage_sig = _stages_signature(stages)
+
+    if old_stage_sig and old_stage_sig != new_stage_sig:
+        reasons.append("sell.dic stages changed")
+    if old_qty is None or old_avg is None:
+        reasons.append("legacy state migrated")
+    else:
         try:
-            p.write_text(json.dumps({"fired_idxs": []}), encoding="utf-8")
+            old_qty_f = float(old_qty)
+            if old_qty_f <= 0 or qty > old_qty_f * (1.0 + SELL_STAGE_RESET_QTY_INCREASE_PCT / 100.0):
+                reasons.append(f"qty increased {old_qty_f:g}->{qty:g}")
+        except Exception:
+            reasons.append("qty snapshot changed")
+        try:
+            old_avg_f = float(old_avg)
+            if old_avg_f > 0 and abs(avg - old_avg_f) / old_avg_f * 100.0 >= SELL_STAGE_RESET_AVG_COST_PCT:
+                reasons.append(f"avg cost changed {old_avg_f:.4f}->{avg:.4f}")
+        except Exception:
+            reasons.append("avg cost snapshot changed")
+    if old_mv is not None and market_value is not None:
+        try:
+            old_mv_f = float(old_mv)
+            if old_mv_f > 0 and abs(market_value - old_mv_f) / old_mv_f * 100.0 >= SELL_STAGE_RESET_MV_PCT:
+                reasons.append(f"market value changed {old_mv_f:.2f}->{market_value:.2f}")
         except Exception:
             pass
+
+    if not reasons:
+        return state, False, ""
+
+    state["fired_idxs"] = []
+    state["last_reset_ts"] = _iso_now()
+    state["last_reset_reason"] = "; ".join(reasons)
+    _update_stage_state_snapshot(sym, state, qty, avg, market_value, stages)
+    return _load_stage_state(sym), True, state["last_reset_reason"]
+
+def _mark_stage_fired(sym: str, idx: int):
+    st = _load_stage_state(sym)
+    if idx not in st.get("fired_idxs", []):
+        st.setdefault("fired_idxs", []).append(idx)
+    _write_stage_state(sym, st)
+
+def _reset_stage_state(sym: str):
+    st = _load_stage_state(sym)
+    st["fired_idxs"] = []
+    st["last_reset_ts"] = _iso_now()
+    st["last_reset_reason"] = "manual or final-stage rearm"
+    _write_stage_state(sym, st)
 
 # ------------------- sell.dic helpers -------------------
 def _as_float(x, default=None):
@@ -952,9 +1082,44 @@ def main():
                         next_idx = i
                         break
                 if next_idx is None:
-                    if verbose:
-                        print(f"[WHY] {sym} all stages exhausted", flush=True)
-                    continue
+                    try:
+                        q = get_quote(client, sym)
+                        last, bid, ask = q.get("last"), q.get("bid"), q.get("ask")
+                        sp = spread_pct(bid, ask)
+                    except Exception:
+                        last = bid = ask = sp = None
+                    state, reset_done, reset_reason = _maybe_reset_exhausted_stage_state(
+                        sym,
+                        state,
+                        stages,
+                        pos[sym],
+                        last_price=last,
+                    )
+                    if reset_done:
+                        print(f"[RESET] {sym} sell stages reset due to position change: {reset_reason}", flush=True)
+                        fired = set(state.get("fired_idxs", []))
+                        for i, st in enumerate(stages):
+                            if i not in fired:
+                                next_idx = i
+                                break
+                    if next_idx is None:
+                        avg_exhausted = pos[sym].get("avg")
+                        mv_exhausted = None
+                        try:
+                            mv_exhausted = float(pos[sym]["qty"]) * float(last or avg_exhausted or 0.0)
+                        except Exception:
+                            pass
+                        _update_stage_state_snapshot(sym, state, pos[sym]["qty"], avg_exhausted, mv_exhausted, stages)
+                        print(f"[HOLD] {sym} sell stages exhausted; monitoring for reset conditions", flush=True)
+                        heartbeat_sell(
+                            sym,
+                            last=last, bid=bid, ask=ask, avg=avg_exhausted, tp=None,
+                            spread_pct_val=sp, pos_qty=int(pos[sym]["qty"]), cooldown_ok_flag=True, armed=False,
+                            pending_sell_qty=sum(int(o.get("qty", 0)) for o in pending.get(sym, [])),
+                            stage_text="SELL STAGES EXHAUSTED",
+                            extra="hold(stage_exhausted)"
+                        )
+                        continue
 
                 st = stages[next_idx]
                 raw_thr = float(st["thr_pct"])
@@ -980,6 +1145,10 @@ def main():
                 sp = spread_pct(bid, ask)
                 pend_qty = sum(int(o.get("qty", 0)) for o in pending.get(sym, []))
                 armed = bool(last and tp and last >= tp)
+                try:
+                    _update_stage_state_snapshot(sym, state, pos[sym]["qty"], avg, float(pos[sym]["qty"]) * float(last), stages)
+                except Exception:
+                    pass
 
                 try:
                     profit_pct = (last / avg - 1.0) * 100.0

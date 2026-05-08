@@ -1693,6 +1693,11 @@ def _run_unlocked(symbol: str,
         if not regime_up:
             _log_final(symbol=stock, signal="HOLD", block="regime", ask=ask, cap_headroom=cap_headroom)
             return
+        # Strict ATR must be authoritative. Direction-change triggers are advisory
+        # unless the normal ATR/target gate is satisfied.
+        print(f"[TRIGGER-BLOCK] {stock} direction-change triggers disabled because strict_atr target not met.")
+        _log_final(symbol=stock, signal="HOLD", block="strict_atr", ask=ask, cap_headroom=cap_headroom)
+        return
 
     # --- Direction Change Trigger ---
     try:

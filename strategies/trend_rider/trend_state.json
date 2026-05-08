@@ -1,6 +1,11 @@
 {
-  "mode": "proposal_only",
-  "positions": [],
-  "last_evaluation": null,
-  "live_orders_enabled": false
+  "last_accepted_symbols": {},
+  "last_evaluation": "2026-05-07T12:13:25",
+  "last_proposed_symbols": {
+    "AVGO": "2026-05-07",
+    "NVDA": "2026-05-07"
+  },
+  "live_orders_enabled": false,
+  "manual_actions_only": true,
+  "mode": "proposal_only"
 }
