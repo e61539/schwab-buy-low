@@ -47,6 +47,14 @@ BUYLOW_LOG_TIMEOUT_SEC = float(os.getenv("BUYLOW_LOG_TIMEOUT_SEC", "8"))
 _buylow_log_cache = {"ts": 0.0, "data": None}
 _buylow_log_cache_lock = threading.Lock()
 
+POSITIONS_PROXY_TIMEOUT_SEC = float(os.getenv("POSITIONS_PROXY_TIMEOUT_SEC", "30"))
+POSITIONS_PROXY_RETRIES = int(os.getenv("POSITIONS_PROXY_RETRIES", "2"))
+POSITIONS_PROXY_RETRY_SLEEP_SEC = float(os.getenv("POSITIONS_PROXY_RETRY_SLEEP_SEC", "0.75"))
+POSITIONS_PROXY_INFLIGHT_WAIT_SEC = float(os.getenv("POSITIONS_PROXY_INFLIGHT_WAIT_SEC", "1.0"))
+_positions_fetch_lock = threading.Lock()
+_positions_cache_lock = threading.Lock()
+_positions_lkg_cache: dict[str, dict] = {}
+
 # ====== CONFIG ======
 # Put a long random string here.
 API_KEY = os.environ.get("TRADE_API_KEY")
@@ -460,6 +468,84 @@ def api_capital_utilization(request: Request):
 
 from fastapi import Query
 
+def _tail_for_log(value: str | None, limit: int = 600) -> str:
+    text = (value or "").replace("\r", " ").replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+def _positions_cache_key(symbol: str | None) -> str:
+    return (symbol or "__ALL__").strip().upper() or "__ALL__"
+
+def _clone_json_dict(data: dict) -> dict:
+    return json.loads(json.dumps(data))
+
+def _get_cached_positions(cache_key: str, stale_reason: str) -> dict | None:
+    with _positions_cache_lock:
+        entry = _positions_lkg_cache.get(cache_key)
+        if not entry:
+            return None
+        cached_ts = float(entry.get("ts") or 0.0)
+        data = _clone_json_dict(entry["data"])
+
+    data["stale"] = True
+    data["stale_reason"] = stale_reason
+    data["cache_age_sec"] = round(time.time() - cached_ts, 2)
+    return data
+
+def _set_cached_positions(cache_key: str, data: dict) -> dict:
+    fresh = _clone_json_dict(data)
+    fresh["stale"] = False
+    fresh["stale_reason"] = None
+    fresh["cache_age_sec"] = 0.0
+    with _positions_cache_lock:
+        _positions_lkg_cache[cache_key] = {
+            "ts": time.time(),
+            "data": _clone_json_dict(fresh),
+        }
+    return fresh
+
+def _fetch_positions_from_trade_server(req: urllib.request.Request, attempt: int) -> dict:
+    start = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=POSITIONS_PROXY_TIMEOUT_SEC) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                print(
+                    "[POSITIONS] "
+                    f"attempt={attempt} elapsed_ms={elapsed_ms:.1f} status={getattr(resp, 'status', '?')} "
+                    f"json_error={exc} body_tail={_tail_for_log(raw)}"
+                )
+                raise RuntimeError(f"trade_server returned invalid JSON: {exc}") from exc
+            print(
+                "[POSITIONS] "
+                f"attempt={attempt} elapsed_ms={elapsed_ms:.1f} status={getattr(resp, 'status', '?')} ok=true"
+            )
+            return data
+    except urllib.error.HTTPError as exc:
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = str(exc)
+        print(
+            "[POSITIONS] "
+            f"attempt={attempt} elapsed_ms={elapsed_ms:.1f} status={exc.code} "
+            f"return_code={exc.code} stderr_tail={_tail_for_log(body)}"
+        )
+        raise RuntimeError(f"trade_server HTTP {exc.code}: {_tail_for_log(body, 240)}") from exc
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        print(
+            "[POSITIONS] "
+            f"attempt={attempt} elapsed_ms={elapsed_ms:.1f} status=error return_code=NA "
+            f"stderr_tail={_tail_for_log(str(exc))}"
+        )
+        raise
+
 @app.get("/api/positions")
 def api_positions(
     k: str | None = Query(default=None),
@@ -472,9 +558,11 @@ def api_positions(
     if not k or k.strip() != API_KEY:
         raise HTTPException(status_code=403, detail="Forbidden")
 
+    normalized_symbol = symbol.strip().upper() if symbol else None
+    cache_key = _positions_cache_key(normalized_symbol)
     url = f"{TRADE_SERVER_BASE}/api/positions"
-    if symbol:
-        url += f"?symbol={symbol.strip().upper()}"
+    if normalized_symbol:
+        url += f"?symbol={normalized_symbol}"
 
     req = urllib.request.Request(
         url,
@@ -485,18 +573,46 @@ def api_positions(
         method="GET",
     )
 
+    acquired_fetch_lock = _positions_fetch_lock.acquire(blocking=False)
+    if not acquired_fetch_lock:
+        acquired_fetch_lock = _positions_fetch_lock.acquire(timeout=POSITIONS_PROXY_INFLIGHT_WAIT_SEC)
+        if not acquired_fetch_lock:
+            cached = _get_cached_positions(cache_key, "positions fetch already in progress")
+            if cached is not None:
+                print(
+                    "[POSITIONS] returning stale cache because another positions fetch is still running "
+                    f"cache_key={cache_key} cache_age_sec={cached.get('cache_age_sec')}"
+                )
+                return cached
+            raise HTTPException(
+                status_code=502,
+                detail="positions fetch already in progress and no cached positions are available",
+            )
+
+    last_error: Exception | None = None
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            return json.loads(raw)
-    except urllib.error.HTTPError as e:
-        try:
-            body = e.read().decode("utf-8", errors="replace")
-        except Exception:
-            body = str(e)
-        raise HTTPException(status_code=e.code, detail=f"trade_server error: {body}")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Proxy failed: {e}")
+        total_attempts = POSITIONS_PROXY_RETRIES + 1
+        for attempt in range(1, total_attempts + 1):
+            try:
+                data = _fetch_positions_from_trade_server(req, attempt)
+                return _set_cached_positions(cache_key, data)
+            except Exception as exc:
+                last_error = exc
+                if attempt < total_attempts:
+                    time.sleep(POSITIONS_PROXY_RETRY_SLEEP_SEC)
+
+        reason = f"positions fetch failed after {total_attempts} attempts: {_tail_for_log(str(last_error), 240)}"
+        cached = _get_cached_positions(cache_key, reason)
+        if cached is not None:
+            print(
+                "[POSITIONS] returning stale cache after fetch failure "
+                f"cache_key={cache_key} cache_age_sec={cached.get('cache_age_sec')} reason={_tail_for_log(str(last_error), 240)}"
+            )
+            return cached
+        raise HTTPException(status_code=502, detail=reason)
+    finally:
+        if acquired_fetch_lock:
+            _positions_fetch_lock.release()
 
 @app.get("/api/buylow")
 def api_buylow(request: Request):
