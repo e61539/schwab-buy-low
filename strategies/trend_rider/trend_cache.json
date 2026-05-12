@@ -1,101 +1,652 @@
 {
+  "accepted_positions": [
+    {
+      "accepted_ts": "2026-05-11T10:07:22",
+      "broker_avg_cost": 423.2237,
+      "broker_market_value": 8259.11,
+      "broker_qty": 19.0,
+      "current_price": 433.77,
+      "effective_qty": 19.0,
+      "entry_price": 433.77,
+      "entry_qty": 0.0,
+      "market_value": 8259.11,
+      "notes": "",
+      "participation_sleeve": "trend_rider",
+      "position_source": "broker",
+      "proposal_score": 60.0,
+      "registry_qty": 0.0,
+      "sector": "ETF",
+      "strategy": "trend_rider",
+      "symbol": "GLD",
+      "trend_score": 60.0,
+      "unrealized_gain": 217.86,
+      "unrealized_gain_pct": 2.71
+    },
+    {
+      "accepted_ts": "2026-05-11T10:07:08",
+      "broker_avg_cost": 424.53,
+      "broker_market_value": 412.0,
+      "broker_qty": 1.0,
+      "current_price": 415.12,
+      "effective_qty": 1.0,
+      "entry_price": 415.12,
+      "entry_qty": 0.0,
+      "market_value": 412.0,
+      "notes": "",
+      "participation_sleeve": "trend_rider",
+      "position_source": "broker",
+      "proposal_score": 20.0,
+      "registry_qty": 0.0,
+      "sector": "Technology",
+      "strategy": "trend_rider",
+      "symbol": "MSFT",
+      "trend_score": 20.0,
+      "unrealized_gain": -12.53,
+      "unrealized_gain_pct": -2.95
+    },
+    {
+      "accepted_ts": "",
+      "broker_avg_cost": 212.1179,
+      "broker_market_value": 219.42,
+      "broker_qty": 1.001,
+      "current_price": 215.2,
+      "effective_qty": 1.001,
+      "entry_price": 0.0,
+      "entry_qty": 0.0,
+      "market_value": 219.42,
+      "notes": "Broker position detected outside Trend Rider accepted-signal registry.",
+      "participation_sleeve": "trend_rider",
+      "position_source": "broker",
+      "proposal_score": 0.0,
+      "registry_qty": 0.0,
+      "sector": "Semiconductors",
+      "strategy": "trend_rider",
+      "symbol": "NVDA",
+      "trend_score": 0.0,
+      "unrealized_gain": 7.09,
+      "unrealized_gain_pct": 3.34
+    },
+    {
+      "accepted_ts": "",
+      "broker_avg_cost": 712.1951,
+      "broker_market_value": 24.23,
+      "broker_qty": 0.0328,
+      "current_price": 737.62,
+      "effective_qty": 0.0328,
+      "entry_price": 0.0,
+      "entry_qty": 0.0,
+      "market_value": 24.23,
+      "notes": "Broker position detected outside Trend Rider accepted-signal registry.",
+      "participation_sleeve": "trend_rider",
+      "position_source": "broker",
+      "proposal_score": 0.0,
+      "registry_qty": 0.0,
+      "sector": "ETF",
+      "strategy": "trend_rider",
+      "symbol": "SPY",
+      "trend_score": 0.0,
+      "unrealized_gain": 0.87,
+      "unrealized_gain_pct": 3.72
+    },
+    {
+      "accepted_ts": "2026-05-11T10:07:28",
+      "broker_avg_cost": 0.0,
+      "broker_market_value": 0.0,
+      "broker_qty": 0.0,
+      "current_price": 411.68,
+      "effective_qty": 0.0,
+      "entry_price": 411.68,
+      "entry_qty": 0.0,
+      "market_value": 0.0,
+      "notes": "",
+      "participation_sleeve": "trend_rider",
+      "position_source": "accepted_signal_registry",
+      "proposal_score": 65.0,
+      "registry_qty": 0.0,
+      "sector": "Semiconductors",
+      "strategy": "trend_rider",
+      "symbol": "TSM",
+      "trend_score": 65.0,
+      "unrealized_gain": 0.0,
+      "unrealized_gain_pct": null
+    }
+  ],
+  "action_summary": {
+    "AVOID_FOR_NOW": [
+      "META"
+    ],
+    "HOLD_DEFENSIVE": [
+      "GLD"
+    ],
+    "HOLD_STRONG": [
+      "NVDA",
+      "SPY"
+    ],
+    "HOLD_WEAKENING": [
+      "MSFT"
+    ],
+    "WAIT_FOR_COOLDOWN": [
+      "AVGO",
+      "COST",
+      "TSM"
+    ],
+    "WAIT_FOR_PULLBACK": [
+      "QQQ"
+    ]
+  },
+  "actual_positions": [
+    {
+      "accepted_ts": "2026-05-11T10:07:22",
+      "broker_avg_cost": 423.2237,
+      "broker_market_value": 8259.11,
+      "broker_qty": 19.0,
+      "current_price": 433.77,
+      "effective_qty": 19.0,
+      "entry_price": 433.77,
+      "entry_qty": 0.0,
+      "market_value": 8259.11,
+      "notes": "",
+      "participation_sleeve": "trend_rider",
+      "position_source": "broker",
+      "proposal_score": 60.0,
+      "registry_qty": 0.0,
+      "sector": "ETF",
+      "strategy": "trend_rider",
+      "symbol": "GLD",
+      "trend_score": 60.0,
+      "unrealized_gain": 217.86,
+      "unrealized_gain_pct": 2.71
+    },
+    {
+      "accepted_ts": "2026-05-11T10:07:08",
+      "broker_avg_cost": 424.53,
+      "broker_market_value": 412.0,
+      "broker_qty": 1.0,
+      "current_price": 415.12,
+      "effective_qty": 1.0,
+      "entry_price": 415.12,
+      "entry_qty": 0.0,
+      "market_value": 412.0,
+      "notes": "",
+      "participation_sleeve": "trend_rider",
+      "position_source": "broker",
+      "proposal_score": 20.0,
+      "registry_qty": 0.0,
+      "sector": "Technology",
+      "strategy": "trend_rider",
+      "symbol": "MSFT",
+      "trend_score": 20.0,
+      "unrealized_gain": -12.53,
+      "unrealized_gain_pct": -2.95
+    },
+    {
+      "accepted_ts": "",
+      "broker_avg_cost": 212.1179,
+      "broker_market_value": 219.42,
+      "broker_qty": 1.001,
+      "current_price": 215.2,
+      "effective_qty": 1.001,
+      "entry_price": 0.0,
+      "entry_qty": 0.0,
+      "market_value": 219.42,
+      "notes": "Broker position detected outside Trend Rider accepted-signal registry.",
+      "participation_sleeve": "trend_rider",
+      "position_source": "broker",
+      "proposal_score": 0.0,
+      "registry_qty": 0.0,
+      "sector": "Semiconductors",
+      "strategy": "trend_rider",
+      "symbol": "NVDA",
+      "trend_score": 0.0,
+      "unrealized_gain": 7.09,
+      "unrealized_gain_pct": 3.34
+    },
+    {
+      "accepted_ts": "",
+      "broker_avg_cost": 712.1951,
+      "broker_market_value": 24.23,
+      "broker_qty": 0.0328,
+      "current_price": 737.62,
+      "effective_qty": 0.0328,
+      "entry_price": 0.0,
+      "entry_qty": 0.0,
+      "market_value": 24.23,
+      "notes": "Broker position detected outside Trend Rider accepted-signal registry.",
+      "participation_sleeve": "trend_rider",
+      "position_source": "broker",
+      "proposal_score": 0.0,
+      "registry_qty": 0.0,
+      "sector": "ETF",
+      "strategy": "trend_rider",
+      "symbol": "SPY",
+      "trend_score": 0.0,
+      "unrealized_gain": 0.87,
+      "unrealized_gain_pct": 3.72
+    }
+  ],
+  "add_on_blocked": [
+    {
+      "add_on_block_reasons": [
+        "weak_trend_quality",
+        "defensive_holding",
+        "symbol_cap_limit",
+        "sleeve_cap_limit"
+      ],
+      "add_on_eligible": false,
+      "cooldown_age_days": null,
+      "metrics": {
+        "avg_cost": 423.2237,
+        "broker_qty": 19.0,
+        "current_price": 433.77,
+        "distance_above_sma20_pct": 0.6,
+        "sma20": 431.1785,
+        "sma50": 439.1282,
+        "symbol_cap_remaining": -6759.11,
+        "total_cap_remaining": -914.76
+      },
+      "symbol": "GLD"
+    },
+    {
+      "add_on_block_reasons": [
+        "not_profitable",
+        "price_below_sma20",
+        "too_far_from_52w_high",
+        "symbol_cap_limit",
+        "sleeve_cap_limit"
+      ],
+      "add_on_eligible": false,
+      "cooldown_age_days": null,
+      "metrics": {
+        "avg_cost": 424.53,
+        "broker_qty": 1.0,
+        "current_price": 415.12,
+        "distance_above_sma20_pct": -0.25,
+        "sma20": 416.1435,
+        "sma50": 398.147,
+        "symbol_cap_remaining": 1088.0,
+        "total_cap_remaining": -914.76
+      },
+      "symbol": "MSFT"
+    },
+    {
+      "add_on_block_reasons": [
+        "extension_above_sma20_limit",
+        "symbol_cap_limit",
+        "sleeve_cap_limit"
+      ],
+      "add_on_eligible": false,
+      "cooldown_age_days": null,
+      "metrics": {
+        "avg_cost": 212.1179,
+        "broker_qty": 1.001,
+        "current_price": 215.2,
+        "distance_above_sma20_pct": 5.92,
+        "sma20": 203.1815,
+        "sma50": 188.651,
+        "symbol_cap_remaining": 1280.58,
+        "total_cap_remaining": -914.76
+      },
+      "symbol": "NVDA"
+    },
+    {
+      "add_on_block_reasons": [
+        "overextended",
+        "symbol_cap_limit",
+        "sleeve_cap_limit"
+      ],
+      "add_on_eligible": false,
+      "cooldown_age_days": null,
+      "metrics": {
+        "avg_cost": 712.1951,
+        "broker_qty": 0.0328,
+        "current_price": 737.62,
+        "distance_above_sma20_pct": 3.44,
+        "sma20": 713.063,
+        "sma50": 684.28,
+        "symbol_cap_remaining": 1475.77,
+        "total_cap_remaining": -914.76
+      },
+      "symbol": "SPY"
+    }
+  ],
+  "add_on_opportunities": [],
+  "broker_position_debug": {
+    "account": "IRA1",
+    "account_config_value": "72927278",
+    "account_hash_used": "866230B20FF659D895B2C80267F79D90262680DF256D3945F8D434E2B07C04CA",
+    "account_label": "72927278 72927278",
+    "direct_schwab_error": "",
+    "direct_schwab_source_ok": true,
+    "positions_loaded_count": 8,
+    "positions_source": "direct_schwab_account_details",
+    "positions_source_ok": true,
+    "symbols_found": [
+      "AMZN",
+      "DTE",
+      "GLD",
+      "MSFT",
+      "NVDA",
+      "SPY",
+      "SWPPX",
+      "SWVXX"
+    ],
+    "watchlist_symbols_matched": [
+      "SPY",
+      "MSFT",
+      "NVDA",
+      "GLD"
+    ],
+    "watchlist_symbols_not_matched": [
+      "QQQ",
+      "AVGO",
+      "META",
+      "TSM",
+      "COST"
+    ]
+  },
   "data_dir": "C:\\temp",
-  "generated_at": "2026-05-07T12:13:25",
+  "existing_holdings": [
+    {
+      "action_hint": "HOLD_STRONG",
+      "candidate_type": "existing_holding",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 676.58,
+      "metrics": {
+        "atr14": 7.0432,
+        "atr_pct": 0.95,
+        "avg_dollar_volume": 35000000000.0,
+        "cooldown_age_days": null,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 0.06,
+        "high_52": 738.08,
+        "last": 737.62,
+        "recent_abs_daily_move_pct": 0.66,
+        "recent_buy_age_days": null,
+        "sma20": 713.063,
+        "sma50": 684.28,
+        "spread_bps": 1.0
+      },
+      "next_check": "next scheduled trend review",
+      "proposal_dollars": 500.0,
+      "proposal_pct": 0.005,
+      "proposal_price": 737.62,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "overextended",
+        "liquid_large_cap",
+        "tight_spread",
+        "owned",
+        "active_trend_position_holding"
+      ],
+      "reasons": [
+        "active trend position (holding)"
+      ],
+      "rejections": [],
+      "score": 92.0,
+      "sector": "ETF",
+      "status": "holding",
+      "symbol": "SPY"
+    },
+    {
+      "action_hint": "HOLD_STRONG",
+      "candidate_type": "existing_holding",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 185.74,
+      "metrics": {
+        "atr14": 7.3616,
+        "atr_pct": 3.42,
+        "avg_dollar_volume": 30000000000.0,
+        "cooldown_age_days": 4,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 1.19,
+        "high_52": 217.8,
+        "last": 215.2,
+        "recent_abs_daily_move_pct": 1.93,
+        "recent_buy_age_days": null,
+        "sma20": 203.1815,
+        "sma50": 188.651,
+        "spread_bps": 3.0
+      },
+      "next_check": "next scheduled trend review",
+      "proposal_dollars": 500.0,
+      "proposal_pct": 0.005,
+      "proposal_price": 215.2,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "constructive_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "moderate_volatility",
+        "cooldown_active",
+        "owned",
+        "active_trend_position_holding"
+      ],
+      "reasons": [
+        "active trend position (holding)"
+      ],
+      "rejections": [],
+      "score": 65.0,
+      "sector": "Semiconductors",
+      "status": "holding",
+      "symbol": "NVDA"
+    },
+    {
+      "action_hint": "HOLD_DEFENSIVE",
+      "candidate_type": "existing_holding",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 413.28,
+      "metrics": {
+        "atr14": 8.1794,
+        "atr_pct": 1.89,
+        "avg_dollar_volume": 2500000000.0,
+        "cooldown_age_days": null,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 14.9,
+        "high_52": 509.7,
+        "last": 433.77,
+        "recent_abs_daily_move_pct": 1.17,
+        "recent_buy_age_days": 0,
+        "sma20": 431.1785,
+        "sma50": 439.1282,
+        "spread_bps": 2.0
+      },
+      "next_check": "monitor defensive allocation and trend quality",
+      "proposal_dollars": 500.0,
+      "proposal_pct": 0.005,
+      "proposal_price": 433.77,
+      "reason_codes": [
+        "price_above_sma20",
+        "weak_trend_quality",
+        "constructive_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "recent_participation_penalty",
+        "owned",
+        "active_trend_position_holding"
+      ],
+      "reasons": [
+        "active trend position (holding)"
+      ],
+      "rejections": [],
+      "score": 42.0,
+      "sector": "ETF",
+      "status": "holding",
+      "symbol": "GLD"
+    },
+    {
+      "action_hint": "HOLD_WEAKENING",
+      "candidate_type": "existing_holding",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 371.02,
+      "metrics": {
+        "atr14": 11.8273,
+        "atr_pct": 2.85,
+        "avg_dollar_volume": 9000000000.0,
+        "cooldown_age_days": null,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 25.26,
+        "high_52": 555.45,
+        "last": 415.12,
+        "recent_abs_daily_move_pct": 1.81,
+        "recent_buy_age_days": 0,
+        "sma20": 416.1435,
+        "sma50": 398.147,
+        "spread_bps": 2.0
+      },
+      "next_check": "watch SMA20 recovery and trend invalidation level",
+      "proposal_dollars": 500.0,
+      "proposal_pct": 0.005,
+      "proposal_price": 415.12,
+      "reason_codes": [
+        "price_below_sma20",
+        "sma20_above_sma50",
+        "too_far_from_52w_high",
+        "liquid_large_cap",
+        "tight_spread",
+        "recent_participation_penalty",
+        "owned",
+        "active_trend_position_holding"
+      ],
+      "reasons": [
+        "active trend position (holding)"
+      ],
+      "rejections": [],
+      "score": 20.0,
+      "sector": "Technology",
+      "status": "holding",
+      "symbol": "MSFT"
+    }
+  ],
+  "generated_at": "2026-05-11T16:28:49",
   "live_orders_enabled": false,
   "log_dir": "C:\\temp\\logs_trend",
   "manual_actions_only": true,
   "mode": "proposal_only",
-  "rankings": [
+  "new_entries": [],
+  "pending_signals": [
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 351.5,
+      "action_hint": "WAIT_FOR_COOLDOWN",
+      "candidate_type": "accepted_signal",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 360.55,
       "metrics": {
-        "atr14": 13.7339,
-        "atr_pct": 3.23,
-        "avg_dollar_volume": 5000000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 2.8,
-        "high_52": 437.68,
-        "last": 425.44,
+        "atr14": 15.1119,
+        "atr_pct": 3.67,
+        "avg_dollar_volume": 2500000000.0,
+        "cooldown_age_days": 3,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 1.98,
+        "high_52": 420.0,
+        "last": 411.68,
         "recent_abs_daily_move_pct": 1.94,
-        "recent_buy_age_days": null,
-        "sma20": 404.368,
-        "sma50": 355.0919,
-        "spread_bps": 4.0
+        "recent_buy_age_days": 0,
+        "sma20": 389.576,
+        "sma50": 363.2812,
+        "spread_bps": 5.0
       },
+      "next_check": "after cooldown expires",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 425.44,
+      "proposal_price": 411.68,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "constructive_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "moderate_volatility",
+        "cooldown_active",
+        "recent_participation_penalty",
+        "accepted_signal",
+        "no_broker_qty",
+        "accepted_signal_pending_entry"
+      ],
       "reasons": [
-        "tight spread",
-        "moderate volatility",
-        "strong trend",
-        "moderate pullback",
-        "liquid large-cap"
+        "accepted signal / pending entry"
       ],
       "rejections": [],
-      "score": 100.0,
+      "score": 47.0,
       "sector": "Semiconductors",
-      "status": "proposal",
-      "symbol": "AVGO"
-    },
+      "status": "pending_entry",
+      "symbol": "TSM"
+    }
+  ],
+  "rankings": [
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 673.77,
+      "action_hint": "HOLD_STRONG",
+      "candidate_type": "existing_holding",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 676.58,
       "metrics": {
-        "atr14": 7.1753,
-        "atr_pct": 0.98,
+        "atr14": 7.0432,
+        "atr_pct": 0.95,
         "avg_dollar_volume": 35000000000.0,
         "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 0.1,
-        "high_52": 734.59,
-        "last": 733.83,
-        "recent_abs_daily_move_pct": 0.63,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 0.06,
+        "high_52": 738.08,
+        "last": 737.62,
+        "recent_abs_daily_move_pct": 0.66,
         "recent_buy_age_days": null,
-        "sma20": 707.5715,
-        "sma50": 682.545,
+        "sma20": 713.063,
+        "sma50": 684.28,
         "spread_bps": 1.0
       },
+      "next_check": "next scheduled trend review",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 733.83,
+      "proposal_price": 737.62,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "overextended",
+        "liquid_large_cap",
+        "tight_spread",
+        "owned",
+        "active_trend_position_holding"
+      ],
       "reasons": [
-        "price above SMA20",
-        "SMA20 above SMA50",
-        "liquid large-cap",
-        "tight spread"
+        "active trend position (holding)"
       ],
-      "rejections": [
-        "overextended"
-      ],
+      "rejections": [],
       "score": 92.0,
       "sector": "ETF",
-      "status": "rejected",
+      "status": "holding",
       "symbol": "SPY"
     },
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 603.03,
+      "action_hint": "WAIT_FOR_PULLBACK",
+      "candidate_type": "rejected",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 608.11,
       "metrics": {
-        "atr14": 9.3031,
-        "atr_pct": 1.34,
+        "atr14": 10.0103,
+        "atr_pct": 1.41,
         "avg_dollar_volume": 20000000000.0,
         "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 0.02,
-        "high_52": 695.93,
-        "last": 695.77,
-        "recent_abs_daily_move_pct": 0.94,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 0.0,
+        "high_52": 711.23,
+        "last": 711.23,
+        "recent_abs_daily_move_pct": 1.02,
         "recent_buy_age_days": null,
-        "sma20": 651.55,
-        "sma50": 617.3052,
+        "sma20": 660.7955,
+        "sma50": 620.9102,
         "spread_bps": 1.0
       },
+      "next_check": "next daily close near SMA20/pullback zone",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 695.77,
+      "proposal_price": 711.23,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "overextended",
+        "liquid_large_cap",
+        "tight_spread"
+      ],
       "reasons": [
         "price above SMA20",
         "SMA20 above SMA50",
@@ -111,65 +662,133 @@
       "symbol": "QQQ"
     },
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 367.05,
+      "action_hint": "WAIT_FOR_COOLDOWN",
+      "candidate_type": "rejected",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 966.0,
       "metrics": {
-        "atr14": 11.653,
-        "atr_pct": 2.82,
-        "avg_dollar_volume": 9000000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 25.47,
-        "high_52": 555.45,
-        "last": 413.96,
-        "recent_abs_daily_move_pct": 1.71,
+        "atr14": 17.8646,
+        "atr_pct": 1.77,
+        "avg_dollar_volume": 2500000000.0,
+        "cooldown_age_days": 3,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 5.46,
+        "high_52": 1067.08,
+        "last": 1008.79,
+        "recent_abs_daily_move_pct": 0.8,
         "recent_buy_age_days": null,
-        "sma20": 411.546,
-        "sma50": 397.4756,
-        "spread_bps": 2.0
+        "sma20": 1001.155,
+        "sma50": 998.7678,
+        "spread_bps": 4.0
       },
+      "next_check": "after cooldown expires",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 413.96,
-      "reasons": [
-        "price above SMA20",
-        "SMA20 above SMA50",
-        "liquid large-cap",
-        "tight spread"
+      "proposal_price": 1008.79,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "moderate_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "cooldown_active"
       ],
-      "rejections": [
-        "too far from 52-week high"
-      ],
-      "score": 82.0,
-      "sector": "Technology",
-      "status": "rejected",
-      "symbol": "MSFT"
-    },
-    {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 180.62,
-      "metrics": {
-        "atr14": 6.9102,
-        "atr_pct": 3.32,
-        "avg_dollar_volume": 30000000000.0,
-        "cooldown_age_days": 0,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 4.15,
-        "high_52": 216.825,
-        "last": 207.83,
-        "recent_abs_daily_move_pct": 1.93,
-        "recent_buy_age_days": null,
-        "sma20": 200.4735,
-        "sma50": 187.726,
-        "spread_bps": 3.0
-      },
-      "proposal_dollars": 500.0,
-      "proposal_pct": 0.005,
-      "proposal_price": 207.83,
       "reasons": [
         "price above SMA20",
         "SMA20 above SMA50",
         "moderate pullback",
+        "liquid large-cap",
+        "tight spread"
+      ],
+      "rejections": [
+        "cooldown active"
+      ],
+      "score": 81.0,
+      "sector": "Consumer Staples",
+      "status": "rejected",
+      "symbol": "COST"
+    },
+    {
+      "action_hint": "HOLD_STRONG",
+      "candidate_type": "existing_holding",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 185.74,
+      "metrics": {
+        "atr14": 7.3616,
+        "atr_pct": 3.42,
+        "avg_dollar_volume": 30000000000.0,
+        "cooldown_age_days": 4,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 1.19,
+        "high_52": 217.8,
+        "last": 215.2,
+        "recent_abs_daily_move_pct": 1.93,
+        "recent_buy_age_days": null,
+        "sma20": 203.1815,
+        "sma50": 188.651,
+        "spread_bps": 3.0
+      },
+      "next_check": "next scheduled trend review",
+      "proposal_dollars": 500.0,
+      "proposal_pct": 0.005,
+      "proposal_price": 215.2,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "constructive_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "moderate_volatility",
+        "cooldown_active",
+        "owned",
+        "active_trend_position_holding"
+      ],
+      "reasons": [
+        "active trend position (holding)"
+      ],
+      "rejections": [],
+      "score": 65.0,
+      "sector": "Semiconductors",
+      "status": "holding",
+      "symbol": "NVDA"
+    },
+    {
+      "action_hint": "WAIT_FOR_COOLDOWN",
+      "candidate_type": "rejected",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 358.86,
+      "metrics": {
+        "atr14": 15.4293,
+        "atr_pct": 3.59,
+        "avg_dollar_volume": 5000000000.0,
+        "cooldown_age_days": 4,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 1.75,
+        "high_52": 437.68,
+        "last": 430.0,
+        "recent_abs_daily_move_pct": 2.0,
+        "recent_buy_age_days": null,
+        "sma20": 410.173,
+        "sma50": 358.8629,
+        "spread_bps": 4.0
+      },
+      "next_check": "after cooldown expires",
+      "proposal_dollars": 500.0,
+      "proposal_pct": 0.005,
+      "proposal_price": 430.0,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "constructive_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "moderate_volatility",
+        "cooldown_active"
+      ],
+      "reasons": [
+        "price above SMA20",
+        "SMA20 above SMA50",
+        "constructive pullback",
         "liquid large-cap",
         "tight spread",
         "moderate volatility"
@@ -177,104 +796,131 @@
       "rejections": [
         "cooldown active"
       ],
-      "score": 75.0,
+      "score": 65.0,
       "sector": "Semiconductors",
       "status": "rejected",
-      "symbol": "NVDA"
+      "symbol": "AVGO"
     },
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 958.89,
-      "metrics": {
-        "atr14": 18.4318,
-        "atr_pct": 1.85,
-        "avg_dollar_volume": 2500000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 6.68,
-        "high_52": 1067.08,
-        "last": 995.75,
-        "recent_abs_daily_move_pct": 0.87,
-        "recent_buy_age_days": null,
-        "sma20": 1001.6375,
-        "sma50": 997.9808,
-        "spread_bps": 4.0
-      },
-      "proposal_dollars": 500.0,
-      "proposal_pct": 0.005,
-      "proposal_price": 995.75,
-      "reasons": [
-        "SMA20 above SMA50",
-        "moderate pullback",
-        "liquid large-cap",
-        "tight spread"
-      ],
-      "rejections": [
-        "price below SMA20"
-      ],
-      "score": 72.0,
-      "sector": "Consumer Staples",
-      "status": "rejected",
-      "symbol": "COST"
-    },
-    {
-      "data_as_of": "2026-05-06",
+      "action_hint": "WAIT_FOR_COOLDOWN",
+      "candidate_type": "accepted_signal",
+      "data_as_of": "2026-05-08",
       "invalidation_level": 360.55,
       "metrics": {
-        "atr14": 14.4312,
-        "atr_pct": 3.44,
+        "atr14": 15.1119,
+        "atr_pct": 3.67,
         "avg_dollar_volume": 2500000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 0.05,
-        "high_52": 419.7,
-        "last": 419.5,
-        "recent_abs_daily_move_pct": 1.93,
-        "recent_buy_age_days": null,
-        "sma20": 385.089,
-        "sma50": 362.0554,
+        "cooldown_age_days": 3,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 1.98,
+        "high_52": 420.0,
+        "last": 411.68,
+        "recent_abs_daily_move_pct": 1.94,
+        "recent_buy_age_days": 0,
+        "sma20": 389.576,
+        "sma50": 363.2812,
         "spread_bps": 5.0
       },
+      "next_check": "after cooldown expires",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 419.5,
+      "proposal_price": 411.68,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "constructive_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "moderate_volatility",
+        "cooldown_active",
+        "recent_participation_penalty",
+        "accepted_signal",
+        "no_broker_qty",
+        "accepted_signal_pending_entry"
+      ],
       "reasons": [
-        "price above SMA20",
-        "SMA20 above SMA50",
-        "liquid large-cap",
-        "tight spread",
-        "moderate volatility"
+        "accepted signal / pending entry"
       ],
-      "rejections": [
-        "overextended",
-        "sector already represented"
-      ],
-      "score": 66.0,
+      "rejections": [],
+      "score": 47.0,
       "sector": "Semiconductors",
-      "status": "rejected",
+      "status": "pending_entry",
       "symbol": "TSM"
     },
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 574.6,
+      "action_hint": "HOLD_DEFENSIVE",
+      "candidate_type": "existing_holding",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 413.28,
       "metrics": {
-        "atr14": 19.1376,
-        "atr_pct": 3.12,
-        "avg_dollar_volume": 10000000000.0,
+        "atr14": 8.1794,
+        "atr_pct": 1.89,
+        "avg_dollar_volume": 2500000000.0,
         "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 23.03,
-        "high_52": 796.25,
-        "last": 612.88,
-        "recent_abs_daily_move_pct": 1.69,
-        "recent_buy_age_days": null,
-        "sma20": 650.4452,
-        "sma50": 628.2353,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 14.9,
+        "high_52": 509.7,
+        "last": 433.77,
+        "recent_abs_daily_move_pct": 1.17,
+        "recent_buy_age_days": 0,
+        "sma20": 431.1785,
+        "sma50": 439.1282,
         "spread_bps": 2.0
       },
+      "next_check": "monitor defensive allocation and trend quality",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 612.88,
+      "proposal_price": 433.77,
+      "reason_codes": [
+        "price_above_sma20",
+        "weak_trend_quality",
+        "constructive_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "recent_participation_penalty",
+        "owned",
+        "active_trend_position_holding"
+      ],
+      "reasons": [
+        "active trend position (holding)"
+      ],
+      "rejections": [],
+      "score": 42.0,
+      "sector": "ETF",
+      "status": "holding",
+      "symbol": "GLD"
+    },
+    {
+      "action_hint": "AVOID_FOR_NOW",
+      "candidate_type": "rejected",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 573.37,
+      "metrics": {
+        "atr14": 18.1312,
+        "atr_pct": 2.97,
+        "avg_dollar_volume": 10000000000.0,
+        "cooldown_age_days": null,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 23.44,
+        "high_52": 796.25,
+        "last": 609.63,
+        "recent_abs_daily_move_pct": 1.64,
+        "recent_buy_age_days": null,
+        "sma20": 648.8547,
+        "sma50": 626.5501,
+        "spread_bps": 2.0
+      },
+      "next_check": "after price recovers above SMA20 and trend quality improves",
+      "proposal_dollars": 500.0,
+      "proposal_pct": 0.005,
+      "proposal_price": 609.63,
+      "reason_codes": [
+        "price_below_sma20",
+        "sma20_above_sma50",
+        "too_far_from_52w_high",
+        "liquid_large_cap",
+        "tight_spread"
+      ],
       "reasons": [
         "SMA20 above SMA50",
         "liquid large-cap",
@@ -290,98 +936,81 @@
       "symbol": "META"
     },
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 413.28,
+      "action_hint": "HOLD_WEAKENING",
+      "candidate_type": "existing_holding",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 371.02,
       "metrics": {
-        "atr14": 8.3801,
-        "atr_pct": 1.94,
-        "avg_dollar_volume": 2500000000.0,
+        "atr14": 11.8273,
+        "atr_pct": 2.85,
+        "avg_dollar_volume": 9000000000.0,
         "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 15.45,
-        "high_52": 509.7,
-        "last": 430.96,
-        "recent_abs_daily_move_pct": 1.19,
-        "recent_buy_age_days": null,
-        "sma20": 431.658,
-        "sma50": 440.8372,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 25.26,
+        "high_52": 555.45,
+        "last": 415.12,
+        "recent_abs_daily_move_pct": 1.81,
+        "recent_buy_age_days": 0,
+        "sma20": 416.1435,
+        "sma50": 398.147,
         "spread_bps": 2.0
       },
+      "next_check": "watch SMA20 recovery and trend invalidation level",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 430.96,
+      "proposal_price": 415.12,
+      "reason_codes": [
+        "price_below_sma20",
+        "sma20_above_sma50",
+        "too_far_from_52w_high",
+        "liquid_large_cap",
+        "tight_spread",
+        "recent_participation_penalty",
+        "owned",
+        "active_trend_position_holding"
+      ],
       "reasons": [
-        "liquid large-cap",
-        "tight spread"
+        "active trend position (holding)"
       ],
-      "rejections": [
-        "price below SMA20",
-        "weak trend quality",
-        "too far from 52-week high"
-      ],
-      "score": 0.0,
-      "sector": "ETF",
-      "status": "rejected",
-      "symbol": "GLD"
+      "rejections": [],
+      "score": 20.0,
+      "sector": "Technology",
+      "status": "holding",
+      "symbol": "MSFT"
     }
   ],
   "rejected": [
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 673.77,
+      "action_hint": "WAIT_FOR_PULLBACK",
+      "candidate_type": "rejected",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 608.11,
       "metrics": {
-        "atr14": 7.1753,
-        "atr_pct": 0.98,
-        "avg_dollar_volume": 35000000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 0.1,
-        "high_52": 734.59,
-        "last": 733.83,
-        "recent_abs_daily_move_pct": 0.63,
-        "recent_buy_age_days": null,
-        "sma20": 707.5715,
-        "sma50": 682.545,
-        "spread_bps": 1.0
-      },
-      "proposal_dollars": 500.0,
-      "proposal_pct": 0.005,
-      "proposal_price": 733.83,
-      "reasons": [
-        "price above SMA20",
-        "SMA20 above SMA50",
-        "liquid large-cap",
-        "tight spread"
-      ],
-      "rejections": [
-        "overextended"
-      ],
-      "score": 92.0,
-      "sector": "ETF",
-      "status": "rejected",
-      "symbol": "SPY"
-    },
-    {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 603.03,
-      "metrics": {
-        "atr14": 9.3031,
-        "atr_pct": 1.34,
+        "atr14": 10.0103,
+        "atr_pct": 1.41,
         "avg_dollar_volume": 20000000000.0,
         "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 0.02,
-        "high_52": 695.93,
-        "last": 695.77,
-        "recent_abs_daily_move_pct": 0.94,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 0.0,
+        "high_52": 711.23,
+        "last": 711.23,
+        "recent_abs_daily_move_pct": 1.02,
         "recent_buy_age_days": null,
-        "sma20": 651.55,
-        "sma50": 617.3052,
+        "sma20": 660.7955,
+        "sma50": 620.9102,
         "spread_bps": 1.0
       },
+      "next_check": "next daily close near SMA20/pullback zone",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 695.77,
+      "proposal_price": 711.23,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "overextended",
+        "liquid_large_cap",
+        "tight_spread"
+      ],
       "reasons": [
         "price above SMA20",
         "SMA20 above SMA50",
@@ -397,65 +1026,89 @@
       "symbol": "QQQ"
     },
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 367.05,
+      "action_hint": "WAIT_FOR_COOLDOWN",
+      "candidate_type": "rejected",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 966.0,
       "metrics": {
-        "atr14": 11.653,
-        "atr_pct": 2.82,
-        "avg_dollar_volume": 9000000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 25.47,
-        "high_52": 555.45,
-        "last": 413.96,
-        "recent_abs_daily_move_pct": 1.71,
+        "atr14": 17.8646,
+        "atr_pct": 1.77,
+        "avg_dollar_volume": 2500000000.0,
+        "cooldown_age_days": 3,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 5.46,
+        "high_52": 1067.08,
+        "last": 1008.79,
+        "recent_abs_daily_move_pct": 0.8,
         "recent_buy_age_days": null,
-        "sma20": 411.546,
-        "sma50": 397.4756,
-        "spread_bps": 2.0
+        "sma20": 1001.155,
+        "sma50": 998.7678,
+        "spread_bps": 4.0
       },
+      "next_check": "after cooldown expires",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 413.96,
-      "reasons": [
-        "price above SMA20",
-        "SMA20 above SMA50",
-        "liquid large-cap",
-        "tight spread"
+      "proposal_price": 1008.79,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "moderate_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "cooldown_active"
       ],
-      "rejections": [
-        "too far from 52-week high"
-      ],
-      "score": 82.0,
-      "sector": "Technology",
-      "status": "rejected",
-      "symbol": "MSFT"
-    },
-    {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 180.62,
-      "metrics": {
-        "atr14": 6.9102,
-        "atr_pct": 3.32,
-        "avg_dollar_volume": 30000000000.0,
-        "cooldown_age_days": 0,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 4.15,
-        "high_52": 216.825,
-        "last": 207.83,
-        "recent_abs_daily_move_pct": 1.93,
-        "recent_buy_age_days": null,
-        "sma20": 200.4735,
-        "sma50": 187.726,
-        "spread_bps": 3.0
-      },
-      "proposal_dollars": 500.0,
-      "proposal_pct": 0.005,
-      "proposal_price": 207.83,
       "reasons": [
         "price above SMA20",
         "SMA20 above SMA50",
         "moderate pullback",
+        "liquid large-cap",
+        "tight spread"
+      ],
+      "rejections": [
+        "cooldown active"
+      ],
+      "score": 81.0,
+      "sector": "Consumer Staples",
+      "status": "rejected",
+      "symbol": "COST"
+    },
+    {
+      "action_hint": "WAIT_FOR_COOLDOWN",
+      "candidate_type": "rejected",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 358.86,
+      "metrics": {
+        "atr14": 15.4293,
+        "atr_pct": 3.59,
+        "avg_dollar_volume": 5000000000.0,
+        "cooldown_age_days": 4,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 1.75,
+        "high_52": 437.68,
+        "last": 430.0,
+        "recent_abs_daily_move_pct": 2.0,
+        "recent_buy_age_days": null,
+        "sma20": 410.173,
+        "sma50": 358.8629,
+        "spread_bps": 4.0
+      },
+      "next_check": "after cooldown expires",
+      "proposal_dollars": 500.0,
+      "proposal_pct": 0.005,
+      "proposal_price": 430.0,
+      "reason_codes": [
+        "price_above_sma20",
+        "sma20_above_sma50",
+        "constructive_pullback",
+        "liquid_large_cap",
+        "tight_spread",
+        "moderate_volatility",
+        "cooldown_active"
+      ],
+      "reasons": [
+        "price above SMA20",
+        "SMA20 above SMA50",
+        "constructive pullback",
         "liquid large-cap",
         "tight spread",
         "moderate volatility"
@@ -463,104 +1116,42 @@
       "rejections": [
         "cooldown active"
       ],
-      "score": 75.0,
+      "score": 65.0,
       "sector": "Semiconductors",
       "status": "rejected",
-      "symbol": "NVDA"
+      "symbol": "AVGO"
     },
     {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 958.89,
+      "action_hint": "AVOID_FOR_NOW",
+      "candidate_type": "rejected",
+      "data_as_of": "2026-05-08",
+      "invalidation_level": 573.37,
       "metrics": {
-        "atr14": 18.4318,
-        "atr_pct": 1.85,
-        "avg_dollar_volume": 2500000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 6.68,
-        "high_52": 1067.08,
-        "last": 995.75,
-        "recent_abs_daily_move_pct": 0.87,
-        "recent_buy_age_days": null,
-        "sma20": 1001.6375,
-        "sma50": 997.9808,
-        "spread_bps": 4.0
-      },
-      "proposal_dollars": 500.0,
-      "proposal_pct": 0.005,
-      "proposal_price": 995.75,
-      "reasons": [
-        "SMA20 above SMA50",
-        "moderate pullback",
-        "liquid large-cap",
-        "tight spread"
-      ],
-      "rejections": [
-        "price below SMA20"
-      ],
-      "score": 72.0,
-      "sector": "Consumer Staples",
-      "status": "rejected",
-      "symbol": "COST"
-    },
-    {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 360.55,
-      "metrics": {
-        "atr14": 14.4312,
-        "atr_pct": 3.44,
-        "avg_dollar_volume": 2500000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 0.05,
-        "high_52": 419.7,
-        "last": 419.5,
-        "recent_abs_daily_move_pct": 1.93,
-        "recent_buy_age_days": null,
-        "sma20": 385.089,
-        "sma50": 362.0554,
-        "spread_bps": 5.0
-      },
-      "proposal_dollars": 500.0,
-      "proposal_pct": 0.005,
-      "proposal_price": 419.5,
-      "reasons": [
-        "price above SMA20",
-        "SMA20 above SMA50",
-        "liquid large-cap",
-        "tight spread",
-        "moderate volatility"
-      ],
-      "rejections": [
-        "overextended",
-        "sector already represented"
-      ],
-      "score": 66.0,
-      "sector": "Semiconductors",
-      "status": "rejected",
-      "symbol": "TSM"
-    },
-    {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 574.6,
-      "metrics": {
-        "atr14": 19.1376,
-        "atr_pct": 3.12,
+        "atr14": 18.1312,
+        "atr_pct": 2.97,
         "avg_dollar_volume": 10000000000.0,
         "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 23.03,
+        "data_age_days": 3,
+        "distance_from_52w_high_pct": 23.44,
         "high_52": 796.25,
-        "last": 612.88,
-        "recent_abs_daily_move_pct": 1.69,
+        "last": 609.63,
+        "recent_abs_daily_move_pct": 1.64,
         "recent_buy_age_days": null,
-        "sma20": 650.4452,
-        "sma50": 628.2353,
+        "sma20": 648.8547,
+        "sma50": 626.5501,
         "spread_bps": 2.0
       },
+      "next_check": "after price recovers above SMA20 and trend quality improves",
       "proposal_dollars": 500.0,
       "proposal_pct": 0.005,
-      "proposal_price": 612.88,
+      "proposal_price": 609.63,
+      "reason_codes": [
+        "price_below_sma20",
+        "sma20_above_sma50",
+        "too_far_from_52w_high",
+        "liquid_large_cap",
+        "tight_spread"
+      ],
       "reasons": [
         "SMA20 above SMA50",
         "liquid large-cap",
@@ -574,82 +1165,34 @@
       "sector": "Communication Services",
       "status": "rejected",
       "symbol": "META"
-    },
-    {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 413.28,
-      "metrics": {
-        "atr14": 8.3801,
-        "atr_pct": 1.94,
-        "avg_dollar_volume": 2500000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 15.45,
-        "high_52": 509.7,
-        "last": 430.96,
-        "recent_abs_daily_move_pct": 1.19,
-        "recent_buy_age_days": null,
-        "sma20": 431.658,
-        "sma50": 440.8372,
-        "spread_bps": 2.0
-      },
-      "proposal_dollars": 500.0,
-      "proposal_pct": 0.005,
-      "proposal_price": 430.96,
-      "reasons": [
-        "liquid large-cap",
-        "tight spread"
-      ],
-      "rejections": [
-        "price below SMA20",
-        "weak trend quality",
-        "too far from 52-week high"
-      ],
-      "score": 0.0,
-      "sector": "ETF",
-      "status": "rejected",
-      "symbol": "GLD"
     }
   ],
-  "shortlist": [
-    {
-      "data_as_of": "2026-05-06",
-      "invalidation_level": 351.5,
-      "metrics": {
-        "atr14": 13.7339,
-        "atr_pct": 3.23,
-        "avg_dollar_volume": 5000000000.0,
-        "cooldown_age_days": null,
-        "data_age_days": 1,
-        "distance_from_52w_high_pct": 2.8,
-        "high_52": 437.68,
-        "last": 425.44,
-        "recent_abs_daily_move_pct": 1.94,
-        "recent_buy_age_days": null,
-        "sma20": 404.368,
-        "sma50": 355.0919,
-        "spread_bps": 4.0
-      },
-      "proposal_dollars": 500.0,
-      "proposal_pct": 0.005,
-      "proposal_price": 425.44,
-      "reasons": [
-        "tight spread",
-        "moderate volatility",
-        "strong trend",
-        "moderate pullback",
-        "liquid large-cap"
-      ],
-      "rejections": [],
-      "score": 100.0,
-      "sector": "Semiconductors",
-      "status": "proposal",
-      "symbol": "AVGO"
-    }
-  ],
+  "shortlist": [],
   "strategy": "trend_rider",
+  "trend_positions_path": "C:\\Users\\cheng_hamn078\\scripts\\schwab-buy-low\\runtime\\state\\trend_positions.json",
+  "trend_sleeve": {
+    "account_value_for_sizing": 100000.0,
+    "add_on_proposal_exposure": 0,
+    "add_on_proposal_exposure_pct": 0.0,
+    "participation_sleeve": "trend_rider",
+    "proposal_exposure": 0,
+    "proposal_exposure_pct": 0.0,
+    "sector_exposure": {
+      "ETF": 8283.34,
+      "Semiconductors": 219.42,
+      "Technology": 412.0
+    },
+    "sector_exposure_pct": {
+      "ETF": 8.28,
+      "Semiconductors": 0.22,
+      "Technology": 0.41
+    },
+    "total_trend_exposure": 8914.76,
+    "total_trend_exposure_pct": 8.91
+  },
   "warnings": [
     "Proposal-only output. No live orders are placed.",
+    "Accepted signal registry records are not holdings unless effective_qty is greater than zero.",
     "Local CSV data may be stale unless refreshed externally."
   ]
 }

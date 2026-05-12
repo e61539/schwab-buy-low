@@ -1753,11 +1753,11 @@ def _cached_buylow_summary(symbol: Optional[str]) -> Optional[dict]:
 
 
 def _lock_paths_for_symbol(symbol: Optional[str]) -> list[Path]:
-    paths = [BUYLOW_LOCK_DIR / "BUYLOW_PORTFOLIO.lock"]
     sym = (symbol or "").strip().upper()
-    if sym:
-        paths.insert(0, BUYLOW_LOCK_DIR / f"{sym}.lock")
-    return paths
+    if not sym:
+        return sorted(BUYLOW_LOCK_DIR.glob("BUYLOW_*.lock"))
+    safe = "".join(ch for ch in sym if ("A" <= ch <= "Z") or ("0" <= ch <= "9") or ch == "_") or "UNKNOWN"
+    return [BUYLOW_LOCK_DIR / f"BUYLOW_{safe}.lock"]
 
 
 def _lock_paths_from_text(text: str) -> list[Path]:
@@ -1776,14 +1776,25 @@ def _remove_stale_lock(lock_path: Path) -> bool:
         age_sec = time.time() - lock_path.stat().st_mtime
         if age_sec <= BUYLOW_LOCK_STALE_SEC:
             return False
-        lock_path.unlink()
-        logger.warning("[LOCK] removed stale lock %s age_sec=%.1f", lock_path, age_sec)
-        return True
     except FileNotFoundError:
         return False
     except Exception as exc:
-        logger.warning("[LOCK] could not remove stale lock %s: %s", lock_path, exc)
+        logger.warning("[LOCK] could not inspect stale lock %s: %s", lock_path, exc)
         return False
+    last_error = None
+    for attempt in range(1, 6):
+        try:
+            lock_path.unlink()
+            logger.warning("[LOCK] removed stale lock %s age_sec=%.1f", lock_path, age_sec)
+            return True
+        except FileNotFoundError:
+            return False
+        except Exception as exc:
+            last_error = exc
+            if attempt < 5:
+                time.sleep(0.2)
+    logger.warning("[LOCK] could not remove stale lock %s after retries: %s", lock_path, last_error)
+    return False
 
 
 def _remove_stale_locks(paths: list[Path]) -> bool:

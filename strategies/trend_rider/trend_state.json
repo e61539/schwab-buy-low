@@ -1,9 +1,15 @@
 {
-  "last_accepted_symbols": {},
-  "last_evaluation": "2026-05-07T12:13:25",
+  "last_accepted_symbols": {
+    "GLD": "2026-05-11",
+    "MSFT": "2026-05-11",
+    "TSM": "2026-05-11"
+  },
+  "last_evaluation": "2026-05-11T16:28:49",
   "last_proposed_symbols": {
     "AVGO": "2026-05-07",
-    "NVDA": "2026-05-07"
+    "COST": "2026-05-08",
+    "NVDA": "2026-05-07",
+    "TSM": "2026-05-08"
   },
   "live_orders_enabled": false,
   "manual_actions_only": true,

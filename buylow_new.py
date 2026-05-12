@@ -25,7 +25,7 @@ Files (defaults):
 Depends on: buy_relax_kit.py, trade_logger.py, schwabdev (env app_key/app_secret + tokens.txt)
 """
 
-import os, sys, json, time as _time, argparse, math, threading, queue
+import os, sys, json, time as _time, argparse, math, threading, queue, socket
 from contextlib import contextmanager
 from datetime import datetime, date, time as ttime, timezone, timedelta
 from pathlib import Path
@@ -142,6 +142,10 @@ APP_ROOT = Path(os.getenv("BUYLOW_HOME", Path(__file__).resolve().parent)).resol
 CONFIG_DIR = APP_ROOT / "config"
 RUNTIME_DIR = APP_ROOT / "runtime"
 LOCKS_DIR = RUNTIME_DIR / "locks"
+BUYLOW_SYMBOL_LOCK_TIMEOUT_SEC = int(float(os.getenv("BUYLOW_SYMBOL_LOCK_TIMEOUT_SEC", "300")))
+BUYLOW_SYMBOL_LOCK_WAIT_SEC = int(float(os.getenv("BUYLOW_SYMBOL_LOCK_WAIT_SEC", "300")))
+LOCK_METADATA_GRACE_SEC = int(float(os.getenv("BUYLOW_LOCK_METADATA_GRACE_SEC", "2")))
+LOCK_BYTE_OFFSET = 4096
 
 def _tokens_file_from_schwab_config() -> str | None:
     cfg_path = os.getenv("SCHWAB_CONFIG_FILE", r"C:\temp\schwab_config.json")
@@ -466,31 +470,279 @@ def wait_for_schwab_client(app_key: str, app_secret: str, label: str = "client")
             _wait_for_manual_reauth(str(e), previous_signature=sig)
 
 @contextmanager
-def file_lock(path, timeout=10):
+def file_lock(path, timeout=10, cleanup=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    fh = open(path, "a+")
+    try:
+        fh = open(path, "r+")
+    except FileNotFoundError:
+        fh = open(path, "w+")
     start = _time.time()
     locked = False
     try:
         while _time.time() - start < timeout:
             try:
                 import msvcrt
+                fh.seek(LOCK_BYTE_OFFSET)
                 msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
                 locked = True; break
             except OSError:
                 _time.sleep(0.2)
         if not locked:
             raise TimeoutError(f"Could not obtain lock: {path}")
-        yield
+        yield fh
     finally:
         if locked:
             try:
-                fh.seek(0)
                 import msvcrt
+                fh.seek(LOCK_BYTE_OFFSET)
                 msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
             except Exception:
                 pass
         fh.close()
+        if cleanup:
+            _remove_lock_file_with_retry(Path(path), "cleanup")
+
+
+def _pid_exists(pid) -> bool:
+    try:
+        pid_int = int(pid)
+    except Exception:
+        return False
+    if pid_int <= 0:
+        return False
+    if pid_int == os.getpid():
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            handle = kernel32.OpenProcess(0x1000, False, pid_int)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER means no such PID.
+        except Exception:
+            pass
+    try:
+        os.kill(pid_int, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _lock_metadata(lock_path: Path, lock_type: str, script_name: str = "") -> dict:
+    return {
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "script_name": script_name or os.path.basename(sys.argv[0] or "buylow_new.py"),
+        "lock_type": lock_type,
+    }
+
+
+def _sanitize_lock_symbol(symbol: str | None) -> str:
+    raw = str(symbol or "UNKNOWN").strip().upper()
+    cleaned = "".join(ch for ch in raw if ("A" <= ch <= "Z") or ("0" <= ch <= "9") or ch == "_")
+    return cleaned or "UNKNOWN"
+
+
+def buylow_symbol_lock_path(symbol: str | None) -> Path:
+    return LOCKS_DIR / f"BUYLOW_{_sanitize_lock_symbol(symbol)}.lock"
+
+
+def _read_lock_metadata(lock_path: Path) -> dict:
+    try:
+        if not lock_path.exists() or lock_path.stat().st_size <= 0:
+            return {}
+        with lock_path.open("r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _lock_age_sec(lock_path: Path, meta: dict | None = None) -> float:
+    meta = meta or {}
+    created_at = str(meta.get("created_at") or "")
+    if created_at:
+        try:
+            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+            return max(0.0, (now - dt).total_seconds())
+        except Exception:
+            pass
+    try:
+        return max(0.0, _time.time() - lock_path.stat().st_mtime)
+    except Exception:
+        return 0.0
+
+
+def _lock_byte_range_busy(lock_path: Path, offset: int) -> bool:
+    if not lock_path.exists():
+        return False
+    try:
+        with lock_path.open("r+") as fh:
+            try:
+                import msvcrt
+                fh.seek(offset)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                return True
+            try:
+                fh.seek(offset)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
+            return False
+    except OSError:
+        return True
+    except Exception:
+        return False
+
+
+def _lock_byte_busy(lock_path: Path) -> bool:
+    return _lock_byte_range_busy(lock_path, LOCK_BYTE_OFFSET) or _lock_byte_range_busy(lock_path, 0)
+
+
+def _lock_debug_record(lock_path: Path, lock_type: str) -> dict:
+    meta = _read_lock_metadata(lock_path)
+    age = _lock_age_sec(lock_path, meta)
+    pid = meta.get("pid")
+    pid_alive = _pid_exists(pid) if pid is not None else None
+    exists = lock_path.exists()
+    lock_busy = _lock_byte_busy(lock_path) if exists else False
+    metadata_missing = bool(exists and pid is None and age > LOCK_METADATA_GRACE_SEC)
+    stale = bool(
+        exists
+        and not lock_busy
+        and (
+            metadata_missing
+            or (pid is not None and not pid_alive)
+            or age > BUYLOW_SYMBOL_LOCK_TIMEOUT_SEC
+        )
+    )
+    return {
+        "path": str(lock_path),
+        "type": lock_type,
+        "exists": lock_path.exists(),
+        "pid": pid,
+        "hostname": meta.get("hostname"),
+        "script_name": meta.get("script_name"),
+        "created_at": meta.get("created_at"),
+        "age_sec": round(age, 1),
+        "lock_busy": lock_busy,
+        "pid_alive": pid_alive,
+        "metadata_missing": metadata_missing,
+        "stale": stale,
+    }
+
+
+def _log_lock_owner(lock_path: Path, lock_type: str) -> None:
+    rec = _lock_debug_record(lock_path, lock_type)
+    if rec["exists"]:
+        print(
+            f"[LOCK-OWNER] type={lock_type} path={lock_path} pid={rec.get('pid')} "
+            f"host={rec.get('hostname')} age_sec={rec.get('age_sec')} "
+            f"lock_busy={rec.get('lock_busy')} stale={rec.get('stale')}"
+        )
+
+
+def _remove_stale_lock_if_needed(lock_path: Path, lock_type: str, *, force: bool = False) -> bool:
+    if not lock_path.exists():
+        return False
+    rec = _lock_debug_record(lock_path, lock_type)
+    stale = bool(rec.get("stale"))
+    if not (force or stale):
+        return False
+    if force:
+        reason = "force"
+    elif rec.get("metadata_missing"):
+        reason = "metadata_missing"
+    elif rec.get("pid") is not None and rec.get("pid_alive") is False:
+        reason = "pid_missing"
+    else:
+        reason = "timeout"
+    print(
+        f"[LOCK-STALE] type={lock_type} path={lock_path} pid={rec.get('pid')} "
+        f"age_sec={rec.get('age_sec')} reason={reason}"
+    )
+    return _remove_lock_file_with_retry(lock_path, f"stale {lock_type}", recovered=True)
+
+
+def _remove_lock_file_with_retry(lock_path: Path, label: str, *, recovered: bool = False) -> bool:
+    last_error = None
+    for attempt in range(1, 6):
+        try:
+            lock_path.unlink()
+            if recovered:
+                print(f"[LOCK-RECOVERED] removed {label} lock path={lock_path}")
+            return True
+        except FileNotFoundError:
+            return False
+        except Exception as e:
+            last_error = e
+            if attempt < 5:
+                _time.sleep(0.2)
+    print(f"[WARN] Could not remove {label} lock file {lock_path}: {last_error}")
+    return False
+
+
+def _write_lock_metadata(fh, metadata: dict) -> None:
+    fh.seek(0)
+    json.dump(metadata, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+    fh.truncate()
+    fh.flush()
+
+
+@contextmanager
+def buy_low_lock(lock_path: Path, lock_type: str, *, timeout: int = 60, script_name: str = ""):
+    _remove_stale_lock_if_needed(lock_path, lock_type)
+    _log_lock_owner(lock_path, lock_type)
+    with file_lock(str(lock_path), timeout=timeout, cleanup=True) as lock_fh:
+        metadata = _lock_metadata(lock_path, lock_type, script_name)
+        _write_lock_metadata(lock_fh, metadata)
+        yield
+
+
+def lock_debug_records(symbol: str | None = None) -> list[dict]:
+    records = []
+    sym = (symbol or "").strip().upper()
+    if sym:
+        records.append(_lock_debug_record(buylow_symbol_lock_path(sym), "symbol"))
+    else:
+        try:
+            for path in sorted(LOCKS_DIR.glob("BUYLOW_*.lock")):
+                records.append(_lock_debug_record(path, "symbol"))
+        except Exception:
+            pass
+    return records
+
+
+def print_lock_debug(symbol: str | None = None) -> None:
+    print("LOCK DEBUG")
+    for rec in lock_debug_records(symbol):
+        if not rec.get("exists"):
+            continue
+        print(
+            f"- type={rec.get('type')} path={rec.get('path')} pid={rec.get('pid')} "
+            f"age_sec={rec.get('age_sec')} stale={rec.get('stale')} "
+            f"lock_busy={rec.get('lock_busy')} "
+            f"metadata_missing={rec.get('metadata_missing')} "
+            f"host={rec.get('hostname')} script={rec.get('script_name')}"
+        )
+
+
+def clear_stale_locks(symbol: str | None = None) -> int:
+    removed = 0
+    print_lock_debug(symbol)
+    for rec in lock_debug_records(symbol):
+        if rec.get("exists") and _remove_stale_lock_if_needed(Path(str(rec["path"])), str(rec.get("type") or "lock")):
+            removed += 1
+    print(f"[LOCK-RECOVERED] stale_locks_removed={removed}")
+    return removed
 
 def in_window(now, hours: str = 'regular') -> bool:
     """Return True if now is inside the allowed trading window."""
@@ -1797,8 +2049,8 @@ def _run_unlocked(symbol: str,
                     cash_after_reserve=cash_budget_trigger,
                 )
             else:
-                lock_path = str(LOCKS_DIR / f"{stock}.lock")
-                with file_lock(lock_path, timeout=10):
+                lock_path = LOCKS_DIR / f"{stock}.lock"
+                with buy_low_lock(lock_path, "symbol", timeout=10, script_name=f"buylow_new.py:{stock}"):
                     resp = client.order_place(account_hash, order)
 
                 accepted, status_code, order_id = _broker_order_accepted(resp)
@@ -2251,8 +2503,8 @@ def _run_unlocked(symbol: str,
             _consume_daily(est_cost)
             continue
 
-        lock_path = str(LOCKS_DIR / f"{stock}.lock")
-        with file_lock(lock_path, timeout=10):
+        lock_path = LOCKS_DIR / f"{stock}.lock"
+        with buy_low_lock(lock_path, "symbol", timeout=10, script_name=f"buylow_new.py:{stock}"):
             resp = client.order_place(account_hash, order)
 
         accepted, status_code, order_id = _broker_order_accepted(resp)
@@ -2308,19 +2560,40 @@ def run(*args, **kwargs):
         symbol = str(args[0]).upper()
     elif "symbol" in kwargs:
         symbol = str(kwargs["symbol"]).upper()
-    lock_path = str(LOCKS_DIR / "BUYLOW_PORTFOLIO.lock")
-    while True:
+    lock_path = buylow_symbol_lock_path(symbol)
+    wait_start = _time.time()
+    auth_retries = 0
+    print(f"[LOCK] using symbol lock: {lock_path}")
+    while _time.time() - wait_start < BUYLOW_SYMBOL_LOCK_WAIT_SEC:
         try:
-            print(f"[LOCK] Waiting for portfolio buy lock ({symbol or 'UNKNOWN'})")
-            with file_lock(lock_path, timeout=60):
-                print(f"[LOCK] Acquired portfolio buy lock ({symbol or 'UNKNOWN'})")
+            print(f"[LOCK] Waiting for symbol buy lock ({symbol or 'UNKNOWN'})")
+            _remove_stale_lock_if_needed(lock_path, "symbol")
+            remaining = max(1, int(BUYLOW_SYMBOL_LOCK_WAIT_SEC - (_time.time() - wait_start)))
+            with buy_low_lock(
+                lock_path,
+                "symbol",
+                timeout=min(60, remaining),
+                script_name=f"buylow_new.py:{symbol or 'UNKNOWN'}",
+            ):
+                print(f"[LOCK] Acquired symbol buy lock ({symbol or 'UNKNOWN'})")
                 return _run_unlocked(*args, **kwargs)
         except SchwabAuthRequired as e:
+            auth_retries += 1
+            if auth_retries > 3:
+                print(f"[AUTH] Schwab auth still unavailable after {auth_retries} attempts; stopping {symbol or 'UNKNOWN'} pass.")
+                return
             print(f"[AUTH] Schwab auth interrupted {symbol or 'UNKNOWN'} pass; releasing lock.")
             sig = _token_file_signature(TOKENS_FILE)
             _wait_for_manual_reauth(str(e), previous_signature=sig)
         except SchwabUnavailable:
             return
+        except TimeoutError as e:
+            print(f"[WARN] {e}")
+            print_lock_debug(symbol)
+            _time.sleep(1)
+    print(f"[WARN] Symbol buy lock wait exceeded {BUYLOW_SYMBOL_LOCK_WAIT_SEC}s for {symbol or 'UNKNOWN'}; skipping this pass.")
+    print_lock_debug(symbol)
+    return
 
 def wait_for_fill(client, account_hash, order_id, timeout_sec=45, interval_sec=3):
     deadline = _time.time() + timeout_sec
@@ -2415,6 +2688,10 @@ def parse_args():
     ap.add_argument("--log-dir", default="", help="Optional log directory (rotating daily file)")
     ap.add_argument("--atrk-file", default=ATRK_OVERRIDES_FILE,
                     help="Per-symbol ATR-K overrides JSON (hot-reloaded each pass). Keys: SYMBOL or DEFAULT")
+    ap.add_argument("--clear-stale-locks", action="store_true",
+                    help="Print lock diagnostics, remove stale BuyLow locks, and exit without trading.")
+    ap.add_argument("--lock-debug", action="store_true",
+                    help="Print BuyLow lock diagnostics and exit without trading.")
     return ap.parse_args()
 
 # ---------- Main ----------
@@ -2427,6 +2704,13 @@ def main():
     if a.symbol_positional:
         symbols.append(a.symbol_positional.strip().upper())
     symbols = [s for s in symbols if s]
+    lock_symbol = symbols[0] if len(symbols) == 1 else None
+    if getattr(a, "clear_stale_locks", False):
+        clear_stale_locks(lock_symbol)
+        return 0
+    if getattr(a, "lock_debug", False):
+        print_lock_debug(lock_symbol)
+        return 0
     if not symbols:
         print("[ERR] --symbols SYMBOL [SYMBOL ...] is required")
         return

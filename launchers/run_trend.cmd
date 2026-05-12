@@ -35,10 +35,8 @@ echo [INFO] Refreshing Trend Rider CSV history...
 "%PY%" -u "%REFRESH_SCRIPT%"
 set "REFRESH_CODE=%ERRORLEVEL%"
 if not "%REFRESH_CODE%"=="0" (
-  echo [ERR] Trend Rider history refresh failed with exit code %REFRESH_CODE%
-  pause
-  popd
-  exit /b %REFRESH_CODE%
+  echo [WARN] Trend Rider history refresh failed with exit code %REFRESH_CODE%
+  echo [WARN] Continuing with existing CSV history. No orders will be placed.
 )
 
 "%PY%" -u "%SCRIPT%" %*
