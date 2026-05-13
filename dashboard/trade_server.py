@@ -27,21 +27,26 @@ from pydantic import BaseModel, Field, field_validator
 # Configuration
 # ============================================================
 
-# Phase 2 path hardening: resolve repo-local paths independently of cwd.
-ROOT = Path(os.getenv("BUYLOW_HOME", Path(__file__).resolve().parents[1])).resolve()
+# Resolve dashboard runtime and repo-local paths independently of cwd.
+DASHBOARD_DIR = Path(__file__).resolve().parent
+DEFAULT_PROJECT_ROOT = Path(r"C:\Users\cheng_hamn078\scripts\schwab-buy-low")
+ROOT = Path(os.getenv("BUYLOW_HOME", str(DEFAULT_PROJECT_ROOT))).resolve()
 CONFIG_DIR = ROOT / "config"
 RUNTIME_DIR = ROOT / "runtime"
 LOCKS_DIR = RUNTIME_DIR / "locks"
 CACHE_DIR = RUNTIME_DIR / "cache"
 STATE_DIR = RUNTIME_DIR / "state"
-for _path in (ROOT, ROOT / "dashboard"):
+for _path in (ROOT, DASHBOARD_DIR):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+print(f"[DASHBOARD] running from {DASHBOARD_DIR}")
+print(f"[DASHBOARD] project root = {ROOT}")
+
 TRADE_API_KEY = os.getenv("TRADE_API_KEY", "").strip()
 
-TRADE_SCRIPT = Path(os.getenv("TRADE_SCRIPT", r"C:\Users\cheng_hamn078\dashboard\Trade.py"))
-POSITIONS_SCRIPT = Path(os.getenv("POSITIONS_SCRIPT", r"C:\Users\cheng_hamn078\dashboard\positions.py"))
+TRADE_SCRIPT = Path(os.getenv("TRADE_SCRIPT", r"C:\Users\cheng_hamn078\Trade.py"))
+POSITIONS_SCRIPT = Path(os.getenv("POSITIONS_SCRIPT", r"C:\Users\cheng_hamn078\positions.py"))
 DEFAULT_ACCT = os.getenv("TRADE_DEFAULT_ACCT", "IRA1").strip() or "IRA1"
 RISK_CONFIG_PATH = Path(os.getenv("RISK_CONFIG_PATH", r"C:\temp\risk_config.json"))
 
@@ -2355,4 +2360,4 @@ def api_logs_search(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("dashboard.trade_server:app", host="127.0.0.1", port=8080, reload=False)
+    uvicorn.run("trade_server:app", host="127.0.0.1", port=8080, reload=False)

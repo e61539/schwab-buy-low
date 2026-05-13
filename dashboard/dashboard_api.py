@@ -21,12 +21,20 @@ from fastapi import Header, HTTPException
 
 app = FastAPI()
 
-# Phase 2 path hardening: resolve repo-local paths independently of cwd.
-ROOT = Path(os.getenv("BUYLOW_HOME", Path(__file__).resolve().parents[1])).resolve()
+# Resolve dashboard runtime and repo-local paths independently of cwd.
+DASHBOARD_DIR = Path(__file__).resolve().parent
+DEFAULT_PROJECT_ROOT = Path(r"C:\Users\cheng_hamn078\scripts\schwab-buy-low")
+ROOT = Path(os.getenv("BUYLOW_HOME", str(DEFAULT_PROJECT_ROOT))).resolve()
 CONFIG_DIR = ROOT / "config"
 RUNTIME_DIR = ROOT / "runtime"
 CACHE_DIR = RUNTIME_DIR / "cache"
 STATE_DIR = RUNTIME_DIR / "state"
+for _path in (ROOT, DASHBOARD_DIR):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
+
+print(f"[DASHBOARD] running from {DASHBOARD_DIR}")
+print(f"[DASHBOARD] project root = {ROOT}")
 
 TRADE_SERVER_BASE = os.getenv("TRADE_SERVER_BASE", "http://127.0.0.1:8080").rstrip("/")
 DEFAULT_CAPITAL_READINESS_FILE = (
@@ -41,6 +49,10 @@ DEFAULT_CAPITAL_UTILIZATION_FILE = (
     else "/tmp/capital_utilization.json"
 )
 CAPITAL_UTILIZATION_FILE = os.getenv("BUYLOW_CAPITAL_UTILIZATION_FILE", DEFAULT_CAPITAL_UTILIZATION_FILE)
+TREND_RIDER_DIR = ROOT / "strategies" / "trend_rider"
+TREND_RIDER_CONFIG_FILE = Path(os.getenv("TREND_RIDER_CONFIG_FILE", str(TREND_RIDER_DIR / "trend_config.json")))
+TREND_RIDER_CACHE_FILE = Path(os.getenv("TREND_RIDER_CACHE_FILE", str(TREND_RIDER_DIR / "trend_cache.json")))
+TREND_RIDER_ETF_UNIVERSE = os.getenv("TREND_RIDER_ETF_UNIVERSE", "")
 
 BUYLOW_LOG_CACHE_TTL_SEC = float(os.getenv("BUYLOW_LOG_CACHE_TTL_SEC", "25"))
 BUYLOW_LOG_TIMEOUT_SEC = float(os.getenv("BUYLOW_LOG_TIMEOUT_SEC", "8"))
@@ -153,6 +165,288 @@ def read_json_file(path: str) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+def normalize_symbol(value) -> str:
+    return str(value or "").strip().upper()
+
+def split_symbols(value: str) -> list[str]:
+    return [sym for sym in (normalize_symbol(part) for part in re.split(r"[,\s]+", value or "")) if sym]
+
+TREND_ACTION_PRIORITY = {
+    "BUY_CANDIDATE": 0,
+    "ADD_ON_CANDIDATE": 1,
+    "HOLD_STRONG": 2,
+    "HOLD_DEFENSIVE": 3,
+    "WAIT_FOR_COOLDOWN": 4,
+    "NEUTRAL": 5,
+    "HOLD_WEAKENING": 6,
+    "AVOID_FOR_NOW": 7,
+}
+
+TREND_BADGE_CLASS = {
+    "BUY_CANDIDATE": "buy",
+    "ADD_ON_CANDIDATE": "buy",
+    "HOLD_STRONG": "strong",
+    "HOLD_DEFENSIVE": "defensive",
+    "WAIT_FOR_COOLDOWN": "cooldown",
+    "NEUTRAL": "neutral",
+    "HOLD_WEAKENING": "weak",
+    "AVOID_FOR_NOW": "avoid",
+}
+
+TREND_ACTION_EXPLANATION = {
+    "BUY_CANDIDATE": "Strong uptrend near highs with constructive pullback.",
+    "ADD_ON_CANDIDATE": "Existing trend position may support a measured add-on.",
+    "HOLD_STRONG": "Active trend position with healthy momentum.",
+    "HOLD_DEFENSIVE": "Defensive holding with weaker momentum characteristics.",
+    "HOLD_WEAKENING": "Trend weakening below SMA20; monitor for recovery or breakdown.",
+    "WAIT_FOR_COOLDOWN": "Recent signal or entry is cooling down to avoid repeated chasing.",
+    "AVOID_FOR_NOW": "Trend setup is not currently suitable for entry.",
+    "NEUTRAL": "No active buy signal; keep monitoring.",
+}
+
+TREND_ACTION_GUIDANCE = {
+    "BUY_CANDIDATE": "Eligible for new entry.",
+    "ADD_ON_CANDIDATE": "Eligible for add-on review.",
+    "HOLD_STRONG": "Continue holding trend position.",
+    "HOLD_DEFENSIVE": "Continue monitoring defensive allocation.",
+    "HOLD_WEAKENING": "Monitor SMA20 recovery and invalidation level.",
+    "WAIT_FOR_COOLDOWN": "Re-evaluate after cooldown expiry.",
+    "AVOID_FOR_NOW": "Do not enter unless trend quality improves.",
+    "NEUTRAL": "Watch only.",
+}
+
+TREND_STATUS_COLOR = {
+    "BUY_CANDIDATE": "green",
+    "ADD_ON_CANDIDATE": "green",
+    "HOLD_STRONG": "green",
+    "HOLD_DEFENSIVE": "yellow",
+    "HOLD_WEAKENING": "orange",
+    "WAIT_FOR_COOLDOWN": "yellow",
+    "AVOID_FOR_NOW": "red",
+    "NEUTRAL": "gray",
+}
+
+TREND_REASON_DESCRIPTIONS = {
+    "accepted_signal": "Signal was previously accepted and is pending or cooling down.",
+    "accepted_signal_pending_entry": "Accepted signal is pending entry confirmation.",
+    "active_trend_position_holding": "Symbol is tracked as an active Trend Rider holding.",
+    "constructive_pullback": "Price has pulled back modestly while the uptrend remains intact.",
+    "cooldown_active": "Cooldown is active to prevent repeated entries.",
+    "extended_distance_from_high": "Price is materially below recent leadership levels.",
+    "healthy_pullback_from_high": "Price has pulled back modestly while the uptrend remains intact.",
+    "liquid_large_cap": "Symbol has large-cap liquidity characteristics.",
+    "moderate_distance_from_high": "Price has pulled back from highs but trend may still be constructive.",
+    "moderate_pullback": "Price has pulled back from highs but trend may still be constructive.",
+    "moderate_volatility": "Volatility is within the strategy's acceptable range.",
+    "near_52w_high": "Price remains near recent leadership levels.",
+    "no_broker_qty": "No broker position is currently detected.",
+    "overextended": "Price may be stretched above its trend baseline.",
+    "owned": "Symbol is already held in the account.",
+    "price_above_sma20": "Price is above the 20-day moving average.",
+    "price_below_sma20": "Price is below the 20-day moving average.",
+    "recent_participation_penalty": "Recent participation reduces urgency for another entry.",
+    "recent_shortlist_signal": "Symbol appeared recently on the shortlist.",
+    "sector_already_represented": "The sector already has Trend Rider representation.",
+    "sma20_above_sma50": "20-day moving average is above the 50-day moving average.",
+    "tight_spread": "Bid/ask spread is tight, suggesting good liquidity.",
+    "too_far_from_52w_high": "Price is materially below recent leadership levels.",
+    "weak_trend_quality": "Trend quality is weaker or less persistent.",
+}
+
+def trend_action_priority(action: str) -> int:
+    return TREND_ACTION_PRIORITY.get(normalize_symbol(action), 99)
+
+def trend_badge_class(action: str) -> str:
+    return TREND_BADGE_CLASS.get(normalize_symbol(action), "neutral")
+
+def build_watchlist_explanation(item: dict) -> str:
+    action = normalize_symbol(item.get("action_hint")) or "NEUTRAL"
+    return TREND_ACTION_EXPLANATION.get(action, TREND_ACTION_EXPLANATION["NEUTRAL"])
+
+def build_action_guidance(action: str) -> str:
+    return TREND_ACTION_GUIDANCE.get(normalize_symbol(action), TREND_ACTION_GUIDANCE["NEUTRAL"])
+
+def trend_status_color(action: str) -> str:
+    return TREND_STATUS_COLOR.get(normalize_symbol(action), "gray")
+
+def describe_reason_code(code: str) -> str:
+    normalized = normalize_symbol(code).lower()
+    if normalized in TREND_REASON_DESCRIPTIONS:
+        return TREND_REASON_DESCRIPTIONS[normalized]
+    return normalized.replace("_", " ").capitalize() + "."
+
+def describe_reasons(reason_codes: list) -> dict[str, str]:
+    return {str(code): describe_reason_code(str(code)) for code in reason_codes}
+
+def format_cooldown_remaining(minutes) -> str:
+    try:
+        remaining = max(0, int(float(minutes)))
+    except Exception:
+        return ""
+    hours, mins = divmod(remaining, 60)
+    if hours:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+def build_cooldown_summary(item: dict) -> dict | None:
+    metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+    reason = str(metrics.get("cooldown_reason") or "").strip()
+    effect = str(metrics.get("cooldown_effect") or "").strip()
+    blocks = str(metrics.get("cooldown_blocks") or "").strip()
+    remaining = metrics.get("cooldown_remaining_minutes")
+    try:
+        remaining_minutes = int(float(remaining)) if remaining is not None else 0
+    except Exception:
+        remaining_minutes = 0
+
+    is_active = bool(reason) and effect != "informational_only" and remaining_minutes > 0 and (
+        bool(blocks) or effect.startswith("blocks_") or "blocks" in effect
+    )
+    if not is_active:
+        return None
+
+    return {
+        "active": True,
+        "reason": reason,
+        "effect": effect,
+        "expires": metrics.get("cooldown_expires") or metrics.get("post_entry_cooldown_expires") or "",
+        "remaining": format_cooldown_remaining(remaining_minutes),
+        "source": metrics.get("cooldown_config_source") or metrics.get("post_entry_cooldown_config_source") or "",
+        "duration_days": metrics.get("cooldown_duration_days"),
+        "summary": f"Cooldown active after {reason.replace('_', ' ')}; prevents repeated chasing and re-entry.",
+    }
+
+def append_unique_symbol(symbols: list[str], value) -> None:
+    sym = normalize_symbol(value)
+    if sym and sym not in symbols:
+        symbols.append(sym)
+
+def configured_trend_etfs(config: dict) -> list[str]:
+    symbols: list[str] = []
+
+    for sym in split_symbols(TREND_RIDER_ETF_UNIVERSE):
+        append_unique_symbol(symbols, sym)
+
+    metadata = config.get("symbol_metadata") if isinstance(config.get("symbol_metadata"), dict) else {}
+    watchlist = [normalize_symbol(sym) for sym in config.get("watchlist", []) if normalize_symbol(sym)]
+    for sym in watchlist:
+        item = metadata.get(sym) if isinstance(metadata.get(sym), dict) else {}
+        if normalize_symbol(item.get("sector")) == "ETF":
+            append_unique_symbol(symbols, sym)
+
+    return symbols
+
+def configured_trend_watchlist(config: dict, report: dict) -> list[str]:
+    symbols: list[str] = []
+
+    watchlist = [normalize_symbol(sym) for sym in config.get("watchlist", []) if normalize_symbol(sym)]
+    for sym in watchlist:
+        append_unique_symbol(symbols, sym)
+
+    for item in trend_report_items(report):
+        append_unique_symbol(symbols, item.get("symbol"))
+
+    return symbols
+
+def trend_report_items(report: dict) -> list[dict]:
+    items_out: list[dict] = []
+    for section in ("rankings", "shortlist", "new_entries", "existing_holdings", "pending_signals", "rejected"):
+        items = report.get(section)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                items_out.append(item)
+    return items_out
+
+def trend_item_by_symbol(report: dict) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for item in trend_report_items(report):
+        sym = normalize_symbol(item.get("symbol"))
+        if sym and sym not in out:
+            out[sym] = item
+    return out
+
+def normalize_trend_dashboard_item(symbol: str, item: dict | None) -> dict:
+    item = item or {}
+    metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+    action = normalize_symbol(item.get("action_hint")) or "NEUTRAL"
+    score = float(item.get("score") or 0.0)
+    status = str(item.get("status") or "neutral")
+    reason_codes = item.get("reason_codes") if isinstance(item.get("reason_codes"), list) else []
+    return {
+        "symbol": symbol,
+        "score": score,
+        "status": status,
+        "action": action,
+        "action_hint": action,
+        "badge_class": trend_badge_class(action),
+        "priority": trend_action_priority(action),
+        "status_color": trend_status_color(action),
+        "explanation": build_watchlist_explanation(item),
+        "action_guidance": build_action_guidance(action),
+        "last": metrics.get("last"),
+        "sma20": metrics.get("sma20"),
+        "sma50": metrics.get("sma50"),
+        "from_high_pct": metrics.get("from_high_pct", metrics.get("distance_from_52w_high_pct")),
+        "cooldown_reason": metrics.get("cooldown_reason"),
+        "cooldown_effect": metrics.get("cooldown_effect"),
+        "cooldown_summary": build_cooldown_summary(item),
+        "reasons": item.get("reasons") if isinstance(item.get("reasons"), list) else [],
+        "reason_codes": reason_codes,
+        "reason_descriptions": describe_reasons(reason_codes),
+        "buy_enabled": action == "BUY_CANDIDATE",
+        "visible": True,
+        "data_available": bool(item),
+    }
+
+def build_trend_action_summary(items: list[dict]) -> dict[str, list[str]]:
+    summary: dict[str, list[str]] = {action: [] for action in TREND_ACTION_PRIORITY}
+    for item in items:
+        action = normalize_symbol(item.get("action")) or "NEUTRAL"
+        summary.setdefault(action, []).append(normalize_symbol(item.get("symbol")))
+    return {action: symbols for action, symbols in summary.items() if symbols}
+
+def load_trend_rider_dashboard() -> dict:
+    config = read_json_file(str(TREND_RIDER_CONFIG_FILE))
+    report = read_json_file(str(TREND_RIDER_CACHE_FILE))
+    watchlist = configured_trend_watchlist(config, report)
+    etf_symbols = configured_trend_etfs(config)
+    by_symbol = trend_item_by_symbol(report)
+
+    items = [normalize_trend_dashboard_item(sym, by_symbol.get(sym)) for sym in watchlist]
+    items.sort(key=lambda item: (item["priority"], -float(item.get("score") or 0.0), item["symbol"]))
+    etf_items = [normalize_trend_dashboard_item(sym, by_symbol.get(sym)) for sym in etf_symbols]
+    etf_items.sort(key=lambda item: (item["priority"], -float(item.get("score") or 0.0), item["symbol"]))
+
+    raw_rankings = report.get("rankings", [])
+    raw_action_summary = report.get("action_summary", {})
+    action_summary = build_trend_action_summary(items)
+    etf_action_summary = build_trend_action_summary(etf_items)
+    return {
+        "ok": True,
+        "strategy": "trend_rider",
+        "generated_at": report.get("generated_at", ""),
+        "config_file": str(TREND_RIDER_CONFIG_FILE),
+        "cache_file": str(TREND_RIDER_CACHE_FILE),
+        "etf_universe": etf_symbols,
+        "trend_etf_symbols": etf_symbols,
+        "watchlist_symbols": watchlist,
+        "symbols": watchlist,
+        "items": items,
+        "watchlist": items,
+        "etfs": etf_items,
+        "watchlist_etfs": etf_items,
+        "trend_watchlist": items,
+        "rankings": items,
+        "raw_rankings": raw_rankings,
+        "action_summary": action_summary,
+        "watchlist_action_summary": action_summary,
+        "etf_action_summary": etf_action_summary,
+        "raw_action_summary": raw_action_summary,
+        "warnings": report.get("warnings", []),
+    }
 
 def parse_iso_datetime(value: str):
     if not value:
@@ -303,6 +597,18 @@ def dash(request: Request):
         input { font-size: 16px; padding: 6px; width: 80px; }
         button { margin: 2px; font-size: 14px; padding: 5px 10px; }
         pre { white-space: pre-wrap; word-wrap: break-word; }
+        .etf-list { display: grid; gap: 6px; }
+        .etf-row { display: grid; grid-template-columns: 56px 1fr; gap: 8px; align-items: center; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+        .etf-row.dim { opacity: 0.62; }
+        .etf-symbol { font-weight: 700; }
+        .badge { border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 700; }
+        .badge.buy { background: #dcfce7; color: #166534; }
+        .badge.strong { background: #e0f2fe; color: #075985; }
+        .badge.defensive { background: #fef9c3; color: #854d0e; }
+        .badge.cooldown { background: #ede9fe; color: #5b21b6; }
+        .badge.neutral { background: #f3f4f6; color: #374151; }
+        .badge.weak, .badge.avoid { background: #fee2e2; color: #991b1b; }
+        .muted { color: #6b7280; font-size: 12px; }
       </style>
     </head>
     <body>
@@ -313,8 +619,11 @@ def dash(request: Request):
           <button onclick="loadDividend()">Dividend</button>
           <button onclick="loadQuote()">Quote</button>
           <button onclick="loadPositions()">Positions</button>
+          <button onclick="loadTrendEtfs()">Trend Watchlist</button>
         </div>
         <p id="status"></p>
+        <h3>Trend Rider Watchlist</h3>
+        <div id="trendEtfs" class="etf-list"></div>
         <pre id="out"></pre>
         <pre id="posout"></pre>
       </div>
@@ -358,6 +667,38 @@ def dash(request: Request):
           const j = await r.json();
           document.getElementById("status").innerText = r.ok ? "OK" : "Error";
           document.getElementById("posout").innerText = JSON.stringify(j, null, 2);
+        }
+
+        function renderTrendEtfs(items) {
+          const box = document.getElementById("trendEtfs");
+          box.innerHTML = "";
+          if (!items || items.length === 0) {
+            box.innerHTML = '<div class="muted">No Trend Rider watchlist symbols found.</div>';
+            return;
+          }
+          for (const item of items || []) {
+            const action = item.action || item.action_hint || "NEUTRAL";
+            const row = document.createElement("div");
+            row.className = "etf-row " + (action === "BUY_CANDIDATE" || action === "HOLD_STRONG" ? "" : "dim");
+            const score = Number(item.score || 0).toFixed(1);
+            const fromHigh = item.from_high_pct === null || item.from_high_pct === undefined ? "" : " | 52w " + item.from_high_pct + "%";
+            row.innerHTML = `
+              <div class="etf-symbol">${item.symbol}</div>
+              <div>
+                <span class="badge ${item.badge_class || "neutral"}">${action}</span>
+                <div class="muted">score ${score}${fromHigh}</div>
+              </div>
+            `;
+            box.appendChild(row);
+          }
+        }
+
+        async function loadTrendEtfs() {
+          document.getElementById("status").innerText = "Loading Trend Rider watchlist...";
+          const r = await fetch("/api/trend-rider/watchlist?k=" + encodeURIComponent(key));
+          const j = await r.json();
+          document.getElementById("status").innerText = r.ok && j.ok ? "OK" : "Error";
+          renderTrendEtfs(j.etfs || []);
         }
         
         
@@ -464,6 +805,11 @@ def api_capital_readiness(request: Request):
 def api_capital_utilization(request: Request):
     require_key(request)
     return load_capital_utilization()
+
+@app.get("/api/trend-rider/watchlist")
+def api_trend_rider_watchlist(request: Request):
+    require_key(request)
+    return load_trend_rider_dashboard()
 
 
 from fastapi import Query
@@ -668,5 +1014,5 @@ def api_ping():
 
 @app.get("/health")
 def api_health():
-    return {"ok": True, "source": "dashboard.dashboard_api", "root": str(ROOT)}
+    return {"ok": True, "source": "dashboard_api", "root": str(ROOT)}
     

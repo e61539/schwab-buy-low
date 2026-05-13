@@ -1,10 +1,11 @@
 @echo off
 setlocal EnableExtensions
-REM Phase 2 path hardening: resolve paths from this launcher location.
+REM Dashboard runtime is share-friendly and lives outside the protected user profile.
 
 set "LAUNCHER_DIR=%~dp0"
 pushd "%LAUNCHER_DIR%.." || exit /b 1
 set "ROOT=%CD%"
+set "DASHBOARD_DIR=C:\shared_dashboard"
 set "BUYLOW_HOME=%ROOT%"
 
 if exist "C:\python313\python.exe" (
@@ -13,31 +14,32 @@ if exist "C:\python313\python.exe" (
   set "PY=python"
 )
 
-set "APP_MODULE="
-if exist "%ROOT%\dashboard\dashboard_api.py" set "APP_MODULE=dashboard.dashboard_api:app"
-if not defined APP_MODULE if exist "%ROOT%\dashboard_api.py" set "APP_MODULE=dashboard_api:app"
+set "APP_MODULE=dashboard_api:app"
 
 if /I "%~1"=="--check" goto check
 
-if not defined APP_MODULE (
-  echo [ERR] Could not find dashboard_api.py under %ROOT%\dashboard or %ROOT%
+if not exist "%DASHBOARD_DIR%\dashboard_api.py" (
+  echo [ERR] Could not find dashboard_api.py under %DASHBOARD_DIR%
   pause
   popd
   exit /b 1
 )
 
+pushd "%DASHBOARD_DIR%" || exit /b 1
 "%PY%" -m uvicorn %APP_MODULE% --host 0.0.0.0 --port 8000
 set "CODE=%ERRORLEVEL%"
 if not "%CODE%"=="0" pause
+popd
 popd
 exit /b %CODE%
 
 :check
 echo ROOT=%ROOT%
+echo DASHBOARD_DIR=%DASHBOARD_DIR%
 echo PY=%PY%
 echo APP_MODULE=%APP_MODULE%
-if not defined APP_MODULE (
-  echo [ERR] Could not find dashboard_api.py under %ROOT%\dashboard or %ROOT%
+if not exist "%DASHBOARD_DIR%\dashboard_api.py" (
+  echo [ERR] Could not find dashboard_api.py under %DASHBOARD_DIR%
   popd
   exit /b 1
 )

@@ -33,7 +33,7 @@ CONFIG_PATH = STRATEGY_DIR / "trend_config.json"
 STATE_PATH = STRATEGY_DIR / "trend_state.json"
 CACHE_PATH = STRATEGY_DIR / "trend_cache.json"
 TREND_POSITIONS_PATH = ROOT / "runtime" / "state" / "trend_positions.json"
-POSITIONS_SCRIPT = Path(os.getenv("POSITIONS_SCRIPT", r"C:\Users\cheng_hamn078\dashboard\positions.py"))
+POSITIONS_SCRIPT = Path(os.getenv("POSITIONS_SCRIPT", r"C:\Users\cheng_hamn078\positions.py"))
 POSITIONS_CACHE_PATH = Path(os.getenv("POSITIONS_CACHE_PATH", r"C:\temp\positions_cache.json"))
 LOG_DIR = Path(os.getenv("TREND_LOG_DIR", r"C:\temp\logs_trend"))
 DEFAULT_DATA_DIR = Path(os.getenv("TREND_DATA_DIR", r"C:\temp"))
@@ -230,6 +230,74 @@ def days_since(value: str | None) -> int | None:
     return (datetime.now().date() - d).days
 
 
+def minutes_until_day(value: date | None) -> int | None:
+    if value is None:
+        return None
+    expiry_dt = datetime.combine(value, datetime.min.time())
+    return max(0, int((expiry_dt - datetime.now()).total_seconds() // 60))
+
+
+def format_minutes(minutes: int | None) -> str:
+    if minutes is None:
+        return "unknown"
+    minutes = max(0, int(minutes))
+    hours, mins = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {mins}m"
+    return f"{mins}m"
+
+
+def cooldown_config_source(config: dict[str, Any], key: str) -> str:
+    return f"config:{key}" if key in config else "hardcoded_default"
+
+
+def cooldown_debug(
+    symbol: str,
+    state: dict[str, Any],
+    *,
+    state_key: str,
+    duration_days: int,
+    config: dict[str, Any],
+    config_key: str,
+    cooldown_type: str,
+    reason: str,
+    blocks: str,
+    effect: str,
+) -> dict[str, Any]:
+    # Cooldowns deliberately slow repeat signals so Trend Rider avoids duplicate buys,
+    # overtrading, and chasing strength during noisy consolidation after a signal.
+    started_raw = (state.get(state_key) or {}).get(symbol)
+    started_day = parse_date(started_raw)
+    if started_day is None:
+        return {
+            "cooldown_type": cooldown_type,
+            "cooldown_reason": "",
+            "cooldown_started": "",
+            "cooldown_expires": "",
+            "cooldown_remaining_minutes": None,
+            "cooldown_blocks": "",
+            "cooldown_effect": effect,
+            "cooldown_duration_days": duration_days,
+            "cooldown_config_source": cooldown_config_source(config, config_key),
+            "cooldown_active": False,
+        }
+    expires_day = started_day + timedelta(days=max(0, duration_days))
+    remaining = minutes_until_day(expires_day)
+    active = datetime.now().date() < expires_day
+    return {
+        "cooldown_type": cooldown_type,
+        "cooldown_reason": reason,
+        "cooldown_started": str(started_raw),
+        "cooldown_expires": expires_day.isoformat(),
+        "cooldown_remaining_minutes": remaining if active else 0,
+        "cooldown_blocks": blocks,
+        "cooldown_effect": effect,
+        "cooldown_duration_days": duration_days,
+        "cooldown_config_source": cooldown_config_source(config, config_key),
+        "cooldown_active": active,
+    }
+
+
 def cooldown_active(symbol: str, state: dict[str, Any], cooldown_days: int) -> tuple[bool, int | None]:
     last = (state.get("last_proposed_symbols") or {}).get(symbol)
     age = days_since(last)
@@ -244,6 +312,21 @@ def accepted_recently(symbol: str, state: dict[str, Any], recent_days: int) -> t
     if age is None:
         return False, None
     return age < recent_days, age
+
+
+def recent_entry_debug(symbol: str, state: dict[str, Any], recent_days: int, config: dict[str, Any]) -> dict[str, Any]:
+    return cooldown_debug(
+        symbol,
+        state,
+        state_key="last_accepted_symbols",
+        duration_days=recent_days,
+        config=config,
+        config_key="recent_purchase_penalty_days",
+        cooldown_type="post_entry",
+        reason="accepted_signal",
+        blocks="new_entries_and_addons",
+        effect="blocks_new_entries_and_addons",
+    )
 
 
 def classify_signal_type(symbol: str, actual_holding_symbols: set[str], accepted_signal_symbols: set[str]) -> str | None:
@@ -266,6 +349,18 @@ def defensive_symbols() -> set[str]:
     return {"GLD"}
 
 
+def high_distance_score_adjustment(from_high_pct: float) -> tuple[int, str, str]:
+    if from_high_pct <= 5:
+        return 15, "near_52w_high", "near 52-week high"
+    if from_high_pct <= 10:
+        return 8, "healthy_pullback_from_high", "healthy pullback from 52-week high"
+    if from_high_pct <= 20:
+        return 0, "moderate_distance_from_high", "moderate distance from 52-week high"
+    if from_high_pct <= 30:
+        return -5, "extended_distance_from_high", "extended distance from 52-week high"
+    return -12, "far_from_52w_high", "far from 52-week high"
+
+
 def choose_action_hint(status: str, reason_codes: list[str], symbol: str = "", sector: str = "") -> str:
     codes = set(reason_codes)
     if "add_on_candidate" in codes:
@@ -283,7 +378,7 @@ def choose_action_hint(status: str, reason_codes: list[str], symbol: str = "", s
             return "HOLD_STRONG"
         if sym in defensive_symbols() or (sector == "ETF" and "weak_trend_quality" in codes):
             return "HOLD_DEFENSIVE"
-        if codes.intersection({"price_below_sma20", "too_far_from_52w_high"}):
+        if codes.intersection({"price_below_sma20", "far_from_52w_high"}):
             return "HOLD_WEAKENING"
         return "HOLD_STRONG"
     if "cooldown_active" in codes:
@@ -726,9 +821,26 @@ def score_candidate(
     daily_returns = [pct_change(close_values[i], close_values[i - 1]) for i in range(1, len(close_values))]
     recent_vol = average([abs(v) for v in daily_returns[-20:]]) or 0.0
     dist_high = (high_52 - latest.close) / high_52 if high_52 else 0.0
+    from_high_pct = dist_high * 100.0
+    high_distance_adj, high_distance_reason_code, high_distance_reason = high_distance_score_adjustment(from_high_pct)
     data_age = (datetime.now().date() - latest.day).days
-    in_cooldown, cooldown_age = cooldown_active(symbol, state, cooldown_days)
     recent_buy, recent_buy_age = accepted_recently(symbol, state, recent_purchase_penalty_days)
+    shortlist_info = cooldown_debug(
+        symbol,
+        state,
+        state_key="last_proposed_symbols",
+        duration_days=cooldown_days,
+        config=config,
+        config_key="cooldown_days",
+        cooldown_type="symbol",
+        reason="recent_shortlist_signal",
+        blocks="printed_alerts_only",
+        effect="informational_only",
+    )
+    recent_entry_info = recent_entry_debug(symbol, state, recent_purchase_penalty_days, config)
+    in_cooldown = bool(registry_type == "accepted_signal" and recent_entry_info.get("cooldown_active"))
+    cooldown_info = recent_entry_info if in_cooldown else shortlist_info
+    cooldown_age = recent_buy_age if in_cooldown else days_since((state.get("last_proposed_symbols") or {}).get(symbol))
 
     metrics.update(
         {
@@ -736,7 +848,10 @@ def score_candidate(
             "sma20": round(sma20 or 0.0, 4),
             "sma50": round(sma50 or 0.0, 4),
             "high_52": round(high_52, 4),
-            "distance_from_52w_high_pct": round(dist_high * 100.0, 2),
+            "distance_from_52w_high_pct": round(from_high_pct, 2),
+            "from_high_pct": round(from_high_pct, 2),
+            "high_distance_score_adj": high_distance_adj,
+            "high_distance_reason": high_distance_reason_code,
             "atr14": round(atr14, 4),
             "atr_pct": round(atr_pct * 100.0, 2),
             "recent_abs_daily_move_pct": round(recent_vol * 100.0, 2),
@@ -745,6 +860,19 @@ def score_candidate(
             "data_age_days": data_age,
             "cooldown_age_days": cooldown_age,
             "recent_buy_age_days": recent_buy_age,
+            "cooldown_type": cooldown_info.get("cooldown_type"),
+            "cooldown_reason": cooldown_info.get("cooldown_reason"),
+            "cooldown_started": cooldown_info.get("cooldown_started"),
+            "cooldown_expires": cooldown_info.get("cooldown_expires"),
+            "cooldown_remaining_minutes": cooldown_info.get("cooldown_remaining_minutes"),
+            "cooldown_blocks": cooldown_info.get("cooldown_blocks"),
+            "cooldown_effect": cooldown_info.get("cooldown_effect"),
+            "cooldown_duration_days": cooldown_info.get("cooldown_duration_days"),
+            "cooldown_config_source": cooldown_info.get("cooldown_config_source"),
+            "post_entry_cooldown_started": recent_entry_info.get("cooldown_started"),
+            "post_entry_cooldown_expires": recent_entry_info.get("cooldown_expires"),
+            "post_entry_cooldown_remaining_minutes": recent_entry_info.get("cooldown_remaining_minutes"),
+            "post_entry_cooldown_config_source": recent_entry_info.get("cooldown_config_source"),
         }
     )
 
@@ -771,22 +899,12 @@ def score_candidate(
         rejections.append("weak trend quality")
         reason_codes.append("weak_trend_quality")
 
-    if dist_high < 0.01:
-        score -= 8
-        rejections.append("overextended")
-        reason_codes.append("overextended")
-    elif 0.02 <= dist_high <= 0.08:
-        score += 16
-        reasons.append("moderate pullback")
-        reason_codes.append("moderate_pullback")
-    elif dist_high <= 0.15:
-        score += 6
-        reasons.append("constructive pullback")
-        reason_codes.append("constructive_pullback")
+    score += high_distance_adj
+    reason_codes.append(high_distance_reason_code)
+    if high_distance_reason_code == "far_from_52w_high":
+        rejections.append(high_distance_reason)
     else:
-        score -= 18
-        rejections.append("too far from 52-week high")
-        reason_codes.append("too_far_from_52w_high")
+        reasons.append(high_distance_reason)
 
     min_avg_dollar_volume = fnum(config.get("min_avg_dollar_volume"), 1000000000.0)
     if avg_dollar_volume >= min_avg_dollar_volume:
@@ -832,6 +950,13 @@ def score_candidate(
         score -= 35
         rejections.append("cooldown active")
         reason_codes.append("cooldown_active")
+        print(
+            f"[COOLDOWN-BLOCK] symbol={symbol} action=BUY_CANDIDATE "
+            f"remaining={format_minutes(cooldown_info.get('cooldown_remaining_minutes'))} "
+            f"type={cooldown_info.get('cooldown_type')} reason={cooldown_info.get('cooldown_reason')}"
+        )
+    elif cooldown_info.get("cooldown_started") and not cooldown_info.get("cooldown_active"):
+        print(f"[COOLDOWN-EXPIRE] symbol={symbol} cooldown expired")
 
     if recent_buy:
         score -= 18
@@ -942,6 +1067,13 @@ def format_ranking(candidate: Candidate) -> str:
         f"{candidate.symbol}: score={candidate.score:.1f}, status={candidate.status}, "
         f"action={candidate.action_hint}, last={m.get('last')}, SMA20={m.get('sma20')}, SMA50={m.get('sma50')}, "
         f"from_high={m.get('distance_from_52w_high_pct')}%, ATR={m.get('atr_pct')}%, "
+        f"from_high_pct={m.get('from_high_pct')}%, high_distance_score_adj={m.get('high_distance_score_adj')}, "
+        f"high_distance_reason={m.get('high_distance_reason')}, "
+        f"cooldown_type={m.get('cooldown_type')}, cooldown_reason={m.get('cooldown_reason')}, "
+        f"cooldown_started={m.get('cooldown_started')}, cooldown_expires={m.get('cooldown_expires')}, "
+        f"cooldown_remaining_minutes={m.get('cooldown_remaining_minutes')}, cooldown_blocks={m.get('cooldown_blocks')}, "
+        f"cooldown_effect={m.get('cooldown_effect')}, "
+        f"cooldown_config_source={m.get('cooldown_config_source')}, "
         f"reasons=[{reasons}], next_check={candidate.next_check}, sector={candidate.sector}, data={candidate.data_as_of}"
     )
 
@@ -1067,6 +1199,7 @@ def build_add_on_opportunities(
         fnum(config.get("default_proposal_pct"), 0.005),
     )
     cooldown_days = int(fnum(config.get("add_on_cooldown_days"), 20))
+    recent_purchase_penalty_days = int(fnum(config.get("recent_purchase_penalty_days"), 30))
     max_distance = fnum(config.get("add_on_max_distance_above_sma20_pct"), 0.035)
     max_symbol_pct = fnum(config.get("max_symbol_trend_exposure_pct"), 0.015)
     max_total_pct = fnum(config.get("max_total_trend_exposure_pct"), 0.08)
@@ -1092,7 +1225,24 @@ def build_add_on_opportunities(
         sma20 = fnum(candidate.metrics.get("sma20") if candidate else None, 0.0)
         sma50 = fnum(candidate.metrics.get("sma50") if candidate else None, 0.0)
         distance_above_sma20 = (current_price - sma20) / sma20 if sma20 > 0 else None
-        cooldown, cooldown_age = add_on_cooldown_active(symbol, state, cooldown_days)
+        add_on_cooldown, add_on_cooldown_age = add_on_cooldown_active(symbol, state, cooldown_days)
+        add_on_cooldown_info = cooldown_debug(
+            symbol,
+            state,
+            state_key="last_add_on_symbols",
+            duration_days=cooldown_days,
+            config=config,
+            config_key="add_on_cooldown_days",
+            cooldown_type="add_on",
+            reason="recent_add_on",
+            blocks="addons",
+            effect="blocks_addons",
+        )
+        post_entry_info = recent_entry_debug(symbol, state, recent_purchase_penalty_days, config)
+        post_entry_cooldown = bool(post_entry_info.get("cooldown_active"))
+        cooldown = add_on_cooldown or post_entry_cooldown
+        cooldown_age = days_since((state.get("last_accepted_symbols") or {}).get(symbol)) if post_entry_cooldown else add_on_cooldown_age
+        cooldown_info = post_entry_info if post_entry_cooldown else add_on_cooldown_info
 
         if current_price > avg_cost > 0:
             reasons.append("profit")
@@ -1127,6 +1277,13 @@ def build_add_on_opportunities(
         if cooldown:
             blocked.append("add-on cooldown active")
             codes.append("add_on_cooldown_active")
+            print(
+                f"[COOLDOWN-BLOCK] symbol={symbol} action=ADD_ON_CANDIDATE "
+                f"remaining={format_minutes(cooldown_info.get('cooldown_remaining_minutes'))} "
+                f"type={cooldown_info.get('cooldown_type')} reason={cooldown_info.get('cooldown_reason')}"
+            )
+        elif cooldown_info.get("cooldown_started") and not cooldown_info.get("cooldown_active"):
+            print(f"[COOLDOWN-EXPIRE] symbol={symbol} add-on cooldown expired")
 
         symbol_cap_remaining = (account_value * max_symbol_pct) - market_value if account_value > 0 else 0.0
         total_cap_remaining = total_cap_dollars - total_market_value if total_cap_dollars > 0 else 0.0
@@ -1152,6 +1309,7 @@ def build_add_on_opportunities(
                 "proposal_dollars": round(proposal_dollars, 2),
                 "cooldown_days": cooldown_days,
                 "cooldown_age_days": cooldown_age,
+                "cooldown": cooldown_info,
                 "reasons": summarize_reasons(reasons),
                 "rejections": [],
                 "reason_codes": dedupe(codes + ["add_on_candidate"]),
@@ -1185,6 +1343,7 @@ def build_add_on_block_diagnostics(
         fnum(config.get("default_proposal_pct"), 0.005),
     )
     cooldown_days = int(fnum(config.get("add_on_cooldown_days"), 20))
+    recent_purchase_penalty_days = int(fnum(config.get("recent_purchase_penalty_days"), 30))
     max_distance = fnum(config.get("add_on_max_distance_above_sma20_pct"), 0.035)
     max_symbol_pct = fnum(config.get("max_symbol_trend_exposure_pct"), 0.015)
     max_total_pct = fnum(config.get("max_total_trend_exposure_pct"), 0.08)
@@ -1205,7 +1364,24 @@ def build_add_on_block_diagnostics(
         sma20 = fnum(candidate.metrics.get("sma20") if candidate else None, 0.0)
         sma50 = fnum(candidate.metrics.get("sma50") if candidate else None, 0.0)
         distance_above_sma20 = (current_price - sma20) / sma20 if sma20 > 0 else None
-        cooldown, cooldown_age = add_on_cooldown_active(symbol, state, cooldown_days)
+        add_on_cooldown, add_on_cooldown_age = add_on_cooldown_active(symbol, state, cooldown_days)
+        add_on_cooldown_info = cooldown_debug(
+            symbol,
+            state,
+            state_key="last_add_on_symbols",
+            duration_days=cooldown_days,
+            config=config,
+            config_key="add_on_cooldown_days",
+            cooldown_type="add_on",
+            reason="recent_add_on",
+            blocks="addons",
+            effect="blocks_addons",
+        )
+        post_entry_info = recent_entry_debug(symbol, state, recent_purchase_penalty_days, config)
+        post_entry_cooldown = bool(post_entry_info.get("cooldown_active"))
+        cooldown = add_on_cooldown or post_entry_cooldown
+        cooldown_age = days_since((state.get("last_accepted_symbols") or {}).get(symbol)) if post_entry_cooldown else add_on_cooldown_age
+        cooldown_info = post_entry_info if post_entry_cooldown else add_on_cooldown_info
 
         if broker_qty <= 0:
             reasons.append("no_broker_qty")
@@ -1215,8 +1391,8 @@ def build_add_on_block_diagnostics(
             reasons.append("price_below_sma20")
         if sma20 <= sma50 or sma50 <= 0:
             reasons.append("weak_trend_quality")
-        if candidate and "too_far_from_52w_high" in candidate.reason_codes:
-            reasons.append("too_far_from_52w_high")
+        if candidate and "far_from_52w_high" in candidate.reason_codes:
+            reasons.append("far_from_52w_high")
         if candidate and "overextended" in candidate.reason_codes:
             reasons.append("overextended")
         if symbol in defensive_symbols():
@@ -1243,6 +1419,7 @@ def build_add_on_block_diagnostics(
                 "add_on_eligible": False,
                 "add_on_block_reasons": dedupe(reasons or ["review_manually"]),
                 "cooldown_age_days": cooldown_age,
+                "cooldown": cooldown_info,
                 "metrics": {
                     "broker_qty": round(broker_qty, 6),
                     "current_price": round(current_price, 4),
@@ -1313,6 +1490,12 @@ def build_action_summary(candidates: list[Candidate]) -> dict[str, list[str]]:
 
 def render_action_plan(report: dict[str, Any], logger: TeeLogger) -> None:
     summary = report.get("action_summary") if isinstance(report.get("action_summary"), dict) else {}
+    candidates_by_symbol = {
+        normalize_symbol(item.get("symbol")): item
+        for section in ("rankings", "pending_signals", "existing_holdings", "rejected", "shortlist")
+        for item in report.get(section, [])
+        if isinstance(item, dict) and normalize_symbol(item.get("symbol"))
+    }
     guidance = {
         "HOLD_WEAKENING": "watch SMA20 recovery",
         "WAIT_FOR_PULLBACK": "wait for pullback toward SMA20",
@@ -1339,6 +1522,20 @@ def render_action_plan(report: dict[str, Any], logger: TeeLogger) -> None:
         logger.write(label)
         for symbol in symbols:
             logger.write(f"* {symbol}")
+            item = candidates_by_symbol.get(normalize_symbol(symbol)) or {}
+            metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+            if label == "WAIT_FOR_COOLDOWN" and metrics.get("cooldown_reason"):
+                logger.write(f"  -> cooldown active after {metrics.get('cooldown_reason')}")
+                logger.write("  -> prevents repeated chasing/re-entry")
+                logger.write(
+                    f"  -> expires in {format_minutes(metrics.get('cooldown_remaining_minutes'))} "
+                    f"({metrics.get('cooldown_expires')})"
+                )
+                logger.write(
+                    f"  -> type={metrics.get('cooldown_type')} blocks={metrics.get('cooldown_blocks')} "
+                    f"effect={metrics.get('cooldown_effect')} source={metrics.get('cooldown_config_source')} "
+                    f"duration_days={metrics.get('cooldown_duration_days')}"
+                )
         if label in guidance:
             logger.write(f"  -> {guidance[label]}")
         wrote_any = True
@@ -1428,6 +1625,17 @@ def build_report(
         "data_dir": str(data_dir),
         "log_dir": str(LOG_DIR),
         "trend_positions_path": str(trend_positions_path),
+        "cooldown_config": {
+            "symbol_cooldown_days": int(fnum(config.get("cooldown_days"), 10)),
+            "symbol_cooldown_source": cooldown_config_source(config, "cooldown_days"),
+            "add_on_cooldown_days": int(fnum(config.get("add_on_cooldown_days"), 20)),
+            "add_on_cooldown_source": cooldown_config_source(config, "add_on_cooldown_days"),
+            "post_entry_penalty_days": int(fnum(config.get("recent_purchase_penalty_days"), 30)),
+            "post_entry_penalty_source": cooldown_config_source(config, "recent_purchase_penalty_days"),
+            "sector_cooldown": "not_configured",
+            "portfolio_cooldown": "not_configured",
+            "post_exit_cooldown": "not_configured",
+        },
         "shortlist": [asdict(c) for c in shortlist],
         "new_entries": [asdict(c) for c in shortlist],
         "add_on_opportunities": add_on_opportunities,
@@ -1450,6 +1658,24 @@ def build_report(
 
 
 def render_report(report: dict[str, Any], logger: TeeLogger) -> None:
+    cooldown_config = report.get("cooldown_config") if isinstance(report.get("cooldown_config"), dict) else {}
+    if cooldown_config:
+        logger.write("COOLDOWN CONFIG")
+        logger.write(
+            f"symbol_days={cooldown_config.get('symbol_cooldown_days')} "
+            f"source={cooldown_config.get('symbol_cooldown_source')} effect=informational_only"
+        )
+        logger.write(
+            f"add_on_days={cooldown_config.get('add_on_cooldown_days')} "
+            f"source={cooldown_config.get('add_on_cooldown_source')} blocks=addons"
+        )
+        logger.write(
+            f"post_entry_penalty_days={cooldown_config.get('post_entry_penalty_days')} "
+            f"source={cooldown_config.get('post_entry_penalty_source')} blocks=new_entries_and_addons"
+        )
+        logger.write("sector_cooldown=not_configured portfolio_cooldown=not_configured post_exit_cooldown=not_configured")
+        logger.write("")
+
     logger.write("NEW ENTRY CANDIDATES")
     shortlist = [Candidate(**c) for c in report.get("new_entries", report.get("shortlist", []))]
     if not shortlist:
@@ -1610,10 +1836,22 @@ def update_state(state: dict[str, Any], report: dict[str, Any]) -> dict[str, Any
         sym = item.get("symbol")
         accepted_ts = item.get("accepted_ts")
         if sym and accepted_ts:
-            state["last_accepted_symbols"][sym] = str(accepted_ts)[:10]
+            accepted_day = str(accepted_ts)[:10]
+            if state["last_accepted_symbols"].get(sym) != accepted_day:
+                print(
+                    f"[COOLDOWN-SET] symbol={sym} type=post_entry "
+                    f"duration_days={report.get('cooldown_config', {}).get('post_entry_penalty_days')} "
+                    f"reason=accepted_signal"
+                )
+            state["last_accepted_symbols"][sym] = accepted_day
     for item in report.get("shortlist", []):
         sym = item.get("symbol")
         if sym:
+            if state["last_proposed_symbols"].get(sym) != today:
+                print(
+                    f"[SHORTLIST-SIGNAL] symbol={sym} type=symbol "
+                    f"reason=recent_shortlist_signal effect=informational_only"
+                )
             state["last_proposed_symbols"][sym] = today
     return state
 

@@ -125,7 +125,7 @@ python -m py_compile capital_utilization_engine.py
 Compile dashboard API when changed:
 
 ```powershell
-python -m py_compile C:\Users\cheng_hamn078\dashboard\dashboard_api.py
+python -m py_compile C:\shared_dashboard\dashboard_api.py
 ```
 
 Run advisory capital utilization dry-run:

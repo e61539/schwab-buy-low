@@ -80,11 +80,40 @@ copy .\config\merrill_reserve.example.json .\config\merrill_reserve.json
 
 Edit market values manually. The real file is ignored by git. This feature does not call Merrill APIs, sell Merrill holdings, transfer funds, place trades, or raise BuyLow caps.
 
-Serve the local dashboard API:
+Serve the shared FastAPI dashboard from the SMB-friendly folder:
 
-```powershell
-python .\dashboard_api.py --host 127.0.0.1 --port 8765
+```cmd
+cd /d C:\shared_dashboard
+python -m uvicorn dashboard_api:app --host 0.0.0.0 --port 8000
 ```
+
+The dashboard code still uses this repo as its project root for config/runtime/log paths:
+
+```cmd
+set BUYLOW_HOME=C:\Users\cheng_hamn078\scripts\schwab-buy-low
+```
+
+Windows share setup:
+
+```cmd
+mkdir C:\shared_dashboard
+net share dashboard=C:\shared_dashboard /grant:Everyone,FULL
+```
+
+Mac Finder path:
+
+```text
+smb://<WINDOWS-IP>/dashboard
+```
+
+## Trend Rider Cooldowns
+
+Trend Rider cooldowns are explainability and risk-control guardrails. They avoid duplicate buys, overtrading, repeated chasing of strength, and repeated signals during noisy consolidation while allowing trend confirmation after a signal or entry.
+
+- Symbol cooldown: configured by `strategies\trend_rider\trend_config.json` key `cooldown_days`; blocks new-entry proposals for the same symbol.
+- Add-on cooldown: configured by `add_on_cooldown_days`; blocks add-on proposals for the same symbol.
+- Post-entry penalty: configured by `recent_purchase_penalty_days`; applies a score penalty after accepted signals or entries.
+- Sector, portfolio, and post-exit cooldowns are not configured unless explicitly added later.
 
 Override the readiness file path if the dashboard runs somewhere else, such as macOS:
 
